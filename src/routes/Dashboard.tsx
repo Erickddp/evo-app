@@ -38,18 +38,28 @@ export function Dashboard() {
         async function loadStats() {
             try {
                 // Load Income Stats
-                const incomeRecords = await dataStore.listRecords('ingresos-manager');
-                if (isMounted && incomeRecords.length) {
+                // Load Income Stats
+                const incomeRecords = (await dataStore.listRecords('ingresos-manager')) || [];
+                if (isMounted && Array.isArray(incomeRecords) && incomeRecords.length > 0) {
                     const last = incomeRecords[incomeRecords.length - 1];
-                    const payload = last.payload as IncomeDashboardStats;
-                    setIncomeStats(payload);
+                    // Safely cast and provide defaults
+                    const payload = (last.payload || {}) as Partial<IncomeDashboardStats>;
+                    setIncomeStats({
+                        totalIncome: Number(payload.totalIncome) || 0,
+                        totalExpense: Number(payload.totalExpense) || 0,
+                        netBalance: Number(payload.netBalance) || 0,
+                        movementsCount: Number(payload.movementsCount) || 0,
+                        updatedAt: payload.updatedAt
+                    });
+                } else if (isMounted) {
+                    setIncomeStats(null);
                 }
 
                 // Load Tax Stats
-                const taxRecords = await dataStore.listRecords<TaxPayment>('tax-tracker');
+                const taxRecords = (await dataStore.listRecords<TaxPayment>('tax-tracker')) || [];
                 if (!isMounted) return;
 
-                if (taxRecords.length > 0) {
+                if (Array.isArray(taxRecords) && taxRecords.length > 0) {
                     const payments = taxRecords.map(r => r.payload).sort((a, b) => a.date.localeCompare(b.date));
 
                     const now = new Date();
@@ -70,20 +80,22 @@ export function Dashboard() {
                     }
 
                     for (const p of payments) {
+                        if (!p) continue;
+                        const amount = Number(p.amount) || 0;
                         const pDate = new Date(p.date);
                         const pYear = pDate.getFullYear();
                         const monthKey = p.date.slice(0, 7);
 
                         if (pYear === currentYear) {
-                            currentYearTotal += p.amount;
-                            if (p.type === 'IVA') ivaPaidYear += p.amount;
-                            if (p.type === 'ISR') isrPaidYear += p.amount;
+                            currentYearTotal += amount;
+                            if (p.type === 'IVA') ivaPaidYear += amount;
+                            if (p.type === 'ISR') isrPaidYear += amount;
                         } else if (pYear === lastYear) {
-                            lastYearTotal += p.amount;
+                            lastYearTotal += amount;
                         }
 
                         if (monthlyMap.has(monthKey)) {
-                            monthlyMap.set(monthKey, (monthlyMap.get(monthKey) || 0) + p.amount);
+                            monthlyMap.set(monthKey, (monthlyMap.get(monthKey) || 0) + amount);
                         }
                     }
 
@@ -97,8 +109,8 @@ export function Dashboard() {
                         currentYearTotal,
                         lastYearTotal,
                         monthlySeries,
-                        lastPaymentDate: lastPayment.date,
-                        lastPaymentAmount: lastPayment.amount,
+                        lastPaymentDate: lastPayment?.date,
+                        lastPaymentAmount: lastPayment ? Number(lastPayment.amount) : undefined,
                         ivaPaidYear,
                         isrPaidYear
                     });
@@ -115,8 +127,12 @@ export function Dashboard() {
         };
     }, []);
 
-    const formatCurrency = (val: number) =>
-        val.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+    const formatCurrency = (val: number | undefined | null) => {
+        if (val === undefined || val === null || !Number.isFinite(val)) {
+            return "$0.00";
+        }
+        return val.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
+    };
 
     const getMonthName = (dateStr: string) => {
         const [year, month] = dateStr.split('-');
@@ -175,7 +191,7 @@ export function Dashboard() {
 
                     {!incomeStats ? (
                         <p className="text-sm text-gray-500 dark:text-gray-400">
-                            Aún no hay movimientos registrados.
+                            No hay datos financieros disponibles. Comienza agregando movimientos.
                         </p>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -271,7 +287,7 @@ export function Dashboard() {
 
                     {!taxStats ? (
                         <p className="text-sm text-gray-500 dark:text-gray-400">
-                            Aún no hay pagos de impuestos registrados.
+                            No hay pagos de impuestos registrados aún.
                         </p>
                     ) : (
                         <div className="space-y-6">

@@ -9,12 +9,19 @@ export interface StoredRecord<T = unknown> {
     payload: T;
 }
 
+export interface ImportResult {
+    totalRows: number;
+    importedCount: number;
+    errorCount: number;
+    errors: string[];
+}
+
 export interface DataStore {
     saveRecord<T = unknown>(toolId: ToolId, payload: T): Promise<StoredRecord<T>>;
     listRecords<T = unknown>(toolId?: ToolId): Promise<StoredRecord<T>[]>;
     clearAll(): Promise<void>;
-    exportAllAsCsv(): Promise<string>; // returns CSV string for now
-    importFromCsv(csvText: string, options?: { clearBefore?: boolean }): Promise<number>;
+    exportAllAsCsv(): Promise<string>;
+    importFromCsv(csvText: string, options?: { clearBefore?: boolean }): Promise<ImportResult>;
 }
 
 const STORAGE_KEY = 'evorix-core-data';
@@ -65,85 +72,178 @@ class LocalStorageDataStore implements DataStore {
         localStorage.removeItem(STORAGE_KEY);
     }
 
-    async importFromCsv(csvText: string, options?: { clearBefore?: boolean }): Promise<number> {
+    async importFromCsv(csvText: string, options?: { clearBefore?: boolean }): Promise<ImportResult> {
+        const result: ImportResult = {
+            totalRows: 0,
+            importedCount: 0,
+            errorCount: 0,
+            errors: []
+        };
+
         if (options?.clearBefore !== false) {
             await this.clearAll();
         }
 
-        const lines = csvText.split(/\r?\n/);
+        // Remove BOM if present
+        let content = csvText;
+        if (content.charCodeAt(0) === 0xFEFF) {
+            content = content.slice(1);
+        }
+
+        const lines = content.split(/\r?\n/);
+
+        // Filter out empty lines
+        const nonEmptyLines = lines.filter(line => line.trim().length > 0);
+
+        if (nonEmptyLines.length === 0) {
+            return result;
+        }
+
+        // Detect delimiter from header
+        const headerLine = nonEmptyLines[0];
+        const commaCount = (headerLine.match(/,/g) || []).length;
+        const semiCount = (headerLine.match(/;/g) || []).length;
+        const delimiter = semiCount > commaCount ? ';' : ',';
+
+        // Validate header
+        const expectedColumns = ['id', 'toolId', 'createdAt', 'updatedAt', 'payload_json'];
+        const headerColumns = this.parseCsvLine(headerLine, delimiter);
+
+        // Basic validation: check if all expected columns are present
+        const missingColumns = expectedColumns.filter(col => !headerColumns.includes(col));
+        if (missingColumns.length > 0) {
+            result.errors.push(`Invalid header. Missing columns: ${missingColumns.join(', ')}`);
+            return result;
+        }
+
         const records: StoredRecord[] = [];
         const existingRecords = options?.clearBefore === false ? this.getRecords() : [];
+        const existingIds = new Set(existingRecords.map(r => r.id));
 
-        // Skip header if present
-        const startIndex = lines[0]?.startsWith('id,toolId,createdAt,updatedAt,payload_json') ? 1 : 0;
-
-        for (let i = startIndex; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
+        // Process rows (skip header)
+        for (let i = 1; i < nonEmptyLines.length; i++) {
+            result.totalRows++;
+            const line = nonEmptyLines[i];
 
             try {
-                // Safe split respecting payload_json might have commas
-                // Expected format: id,toolId,createdAt,updatedAt,"payload_json"
-                // or id,toolId,createdAt,updatedAt,payload_json (if no commas in json)
+                const columns = this.parseCsvLine(line, delimiter);
 
-                // We know the first 4 fields are fixed.
-                const firstComma = line.indexOf(',');
-                const secondComma = line.indexOf(',', firstComma + 1);
-                const thirdComma = line.indexOf(',', secondComma + 1);
-                const fourthComma = line.indexOf(',', thirdComma + 1);
-
-                if (firstComma === -1 || secondComma === -1 || thirdComma === -1 || fourthComma === -1) {
-                    console.warn(`Skipping invalid CSV line ${i + 1}: Not enough columns`);
-                    continue;
+                if (columns.length < 5) {
+                    throw new Error(`Invalid column count. Expected at least 5, got ${columns.length}`);
                 }
 
-                const id = line.substring(0, firstComma);
-                const toolId = line.substring(firstComma + 1, secondComma);
-                const createdAt = line.substring(secondComma + 1, thirdComma);
-                const updatedAt = line.substring(thirdComma + 1, fourthComma);
-                let payloadStr = line.substring(fourthComma + 1);
+                // Map columns based on header position (in case order changes, though we enforce schema)
+                // For now, assume fixed order as per requirement: id, toolId, createdAt, updatedAt, payload_json
+                const [id, toolId, createdAt, updatedAt, payloadJson] = columns;
 
-                // Handle quotes if present (CSV export usually wraps JSON in quotes if it contains commas)
-                if (payloadStr.startsWith('"') && payloadStr.endsWith('"')) {
-                    payloadStr = payloadStr.substring(1, payloadStr.length - 1);
-                    // Unescape double quotes
-                    payloadStr = payloadStr.replace(/""/g, '"');
+                if (!id || !toolId || !createdAt || !updatedAt || !payloadJson) {
+                    throw new Error('Missing required fields');
                 }
 
-                const payload = JSON.parse(payloadStr);
+                let payload;
+                try {
+                    payload = JSON.parse(payloadJson);
+                } catch (e) {
+                    throw new Error('Invalid JSON payload');
+                }
 
                 const record: StoredRecord = {
                     id,
                     toolId,
                     createdAt,
                     updatedAt,
-                    payload,
+                    payload
                 };
-                records.push(record);
+
+                // Upsert logic
+                if (existingIds.has(id)) {
+                    const index = existingRecords.findIndex(r => r.id === id);
+                    if (index !== -1) {
+                        existingRecords[index] = record;
+                    }
+                } else {
+                    records.push(record);
+                    existingIds.add(id);
+                }
+
+                result.importedCount++;
             } catch (e) {
-                console.error(`Failed to parse CSV line ${i + 1}`, e);
+                result.errorCount++;
+                result.errors.push(`Row ${i + 1}: ${e instanceof Error ? e.message : String(e)}`);
+                console.warn(`Failed to parse CSV row ${i + 1}:`, e);
             }
         }
 
         this.saveRecords([...existingRecords, ...records]);
-        return records.length;
+        return result;
     }
 
     async exportAllAsCsv(): Promise<string> {
         const records = this.getRecords();
+        const header = ['id', 'toolId', 'createdAt', 'updatedAt', 'payload_json'];
+
         if (records.length === 0) {
-            return 'id,toolId,createdAt,updatedAt,payload_json';
+            return header.join(',');
         }
 
-        // Simple CSV generation: id, toolId, createdAt, updatedAt, payload (JSON stringified)
-        const header = 'id,toolId,createdAt,updatedAt,payload_json';
         const rows = records.map((r) => {
-            // Escape double quotes in payload JSON
-            const payloadStr = JSON.stringify(r.payload).replace(/"/g, '""');
-            return `${r.id},${r.toolId},${r.createdAt},${r.updatedAt},"${payloadStr}"`;
+            const payloadJson = JSON.stringify(r.payload);
+            return [
+                r.id,
+                r.toolId,
+                r.createdAt,
+                r.updatedAt,
+                payloadJson
+            ].map(this.escapeCsvField).join(',');
         });
 
-        return [header, ...rows].join('\n');
+        return [header.join(','), ...rows].join('\n');
+    }
+
+    private escapeCsvField(field: string): string {
+        if (field === null || field === undefined) return '';
+        const stringField = String(field);
+        // If field contains comma, quote, or newline, wrap in quotes and escape internal quotes
+        if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n') || stringField.includes('\r')) {
+            return `"${stringField.replace(/"/g, '""')}"`;
+        }
+        return stringField;
+    }
+
+    private parseCsvLine(line: string, delimiter: string): string[] {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+
+            if (inQuotes) {
+                if (char === '"') {
+                    if (i + 1 < line.length && line[i + 1] === '"') {
+                        // Escaped quote
+                        current += '"';
+                        i++;
+                    } else {
+                        // End of quotes
+                        inQuotes = false;
+                    }
+                } else {
+                    current += char;
+                }
+            } else {
+                if (char === '"') {
+                    inQuotes = true;
+                } else if (char === delimiter) {
+                    result.push(current);
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+        }
+        result.push(current);
+        return result;
     }
 }
 

@@ -3,12 +3,14 @@ import { cfdiValidatorDefinition } from './cfdi-validator';
 import { ingresosManagerDefinition } from './ingresos-manager';
 import { bankReconcilerDefinition } from './bank-reconciler/meta';
 import { taxTrackerDefinition } from './tax-tracker/meta';
+import { financialSummaryDefinition } from './financial-summary/meta';
 
 export const toolsRegistry: ToolDefinition[] = [
     cfdiValidatorDefinition,
     ingresosManagerDefinition,
     bankReconcilerDefinition,
     taxTrackerDefinition,
+    financialSummaryDefinition,
 ];
 
 export function getToolById(id: string): ToolDefinition | undefined {
