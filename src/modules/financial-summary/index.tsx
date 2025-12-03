@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { PieChart, ArrowUpCircle, ArrowDownCircle, DollarSign, TrendingUp, Activity, Calendar, Filter } from 'lucide-react';
+import { PieChart, ArrowUpCircle, ArrowDownCircle, DollarSign, TrendingUp, Activity } from 'lucide-react';
 import { dataStore } from '../../core/data/dataStore';
 import { type EvoTransaction } from '../../core/domain/evo-transaction';
 import {

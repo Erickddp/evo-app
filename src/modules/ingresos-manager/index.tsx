@@ -147,6 +147,8 @@ export const IngresosManagerTool: React.FC = () => {
                 if (m.type === 'ingreso') {
                     ingreso = m.amount.toString();
                 } else {
+                    // Treat everything else as expense for export purposes if it exists, 
+                    // though we only allow ingreso/gasto now.
                     gasto = m.amount.toString();
                 }
 
@@ -166,6 +168,17 @@ export const IngresosManagerTool: React.FC = () => {
         URL.revokeObjectURL(url);
     };
 
+    const handleDownloadTemplate = () => {
+        const header = 'Fecha,Concepto,Ingreso,Gasto';
+        const blob = new Blob([header], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'plantilla-ingresos.csv';
+        link.click();
+        URL.revokeObjectURL(url);
+    };
+
     const filteredMovements = movements.filter((m) =>
         m.concept.toLowerCase().includes(filterText.toLowerCase())
     );
@@ -180,13 +193,30 @@ export const IngresosManagerTool: React.FC = () => {
             if (!text) return;
 
             try {
-                const newMovements = parseIngresosCsv(text);
-                if (newMovements.length === 0) {
-                    alert('No se encontraron movimientos válidos en el CSV.');
+                const result = parseIngresosCsv(text);
+
+                if (result.movements.length === 0 && result.stats.totalRows > 0) {
+                    alert(`No se importaron movimientos. 
+Total filas: ${result.stats.totalRows}
+Ignoradas: ${result.stats.ignored}
+Errores: ${result.stats.errors}`);
+                } else if (result.movements.length === 0) {
+                    alert('El archivo parece estar vacío o no tiene formato válido.');
                     return;
+                } else {
+                    setMovements(prev => [...prev, ...result.movements]);
+
+                    let msg = `Se importaron ${result.stats.imported} de ${result.stats.totalRows} filas.`;
+                    if (result.stats.ignored > 0) msg += `\n${result.stats.ignored} filas ignoradas (sin importe).`;
+                    if (result.stats.errors > 0) msg += `\n${result.stats.errors} filas con error.`;
+
+                    alert(msg);
                 }
-                setMovements(prev => [...prev, ...newMovements]);
-                alert(`Se importaron ${newMovements.length} movimientos exitosamente.`);
+
+                if (result.stats.errors > 0) {
+                    console.warn('Detalle de errores de importación:', result.stats.errorDetails);
+                }
+
             } catch (e: any) {
                 alert(e.message || 'Error al importar CSV');
             }
@@ -254,8 +284,6 @@ export const IngresosManagerTool: React.FC = () => {
                     >
                         <option value="gasto">Gasto</option>
                         <option value="ingreso">Ingreso</option>
-                        <option value="pago">Pago</option>
-                        <option value="impuesto">Impuesto</option>
                     </select>
                 </div>
                 <div className="w-full md:w-32">
@@ -293,7 +321,17 @@ export const IngresosManagerTool: React.FC = () => {
                         placeholder="Filtrar por concepto..."
                     />
                 </div>
-                <div className="flex gap-2 w-full md:w-auto">
+                <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
+                    <span className="text-xs text-gray-400 hidden lg:inline-block mr-2" title="El CSV debe tener columnas: Fecha, Concepto, Ingreso, Gasto">
+                        Formato: Fecha, Concepto, Ingreso, Gasto
+                    </span>
+                    <button
+                        onClick={handleDownloadTemplate}
+                        className="w-full md:w-auto px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center justify-center gap-2 text-sm"
+                        title="Descargar plantilla vacía"
+                    >
+                        <Download size={14} /> Plantilla
+                    </button>
                     <input
                         type="file"
                         accept=".csv"

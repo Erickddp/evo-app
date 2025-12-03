@@ -166,7 +166,7 @@ export function useFacturas() {
     };
 
     const importCSV = async (file: File): Promise<{ imported: number, skipped: number, errors: string[] }> => {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
             const reader = new FileReader();
             reader.onload = async (e) => {
                 const text = e.target?.result as string;

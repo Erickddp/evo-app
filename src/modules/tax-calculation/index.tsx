@@ -3,8 +3,9 @@ import { Calculator, DollarSign, Calendar, TrendingUp, TrendingDown, AlertCircle
 import { dataStore } from '../../core/data/dataStore';
 import { type EvoTransaction } from '../../core/domain/evo-transaction';
 import type { ToolDefinition } from '../shared/types';
+import { TaxProfileForm } from './components/TaxProfileForm';
+import { getCalculatorForRegimen } from './calculators/factory';
 
-const IVA_RATE = 0.16;
 
 export const TaxCalculationModule: React.FC = () => {
     const [transactions, setTransactions] = useState<EvoTransaction[]>([]);
@@ -29,6 +30,34 @@ export const TaxCalculationModule: React.FC = () => {
         load();
     }, []);
 
+    const [profile, setProfile] = useState<any>(null);
+
+    // Load profile to know which calculator to use
+    useEffect(() => {
+        const loadProfile = async () => {
+            const p = await import('./store/taxProfileStore').then(m => m.taxProfileStore.getTaxProfile());
+            setProfile(p);
+        };
+        loadProfile();
+    }, [loading]); // Reload when loading finishes (or maybe listen to store changes?)
+    // Ideally we should lift state or use a context, but for now let's just reload.
+    // Actually, TaxProfileForm updates the store. We might not see the update immediately here unless we trigger a reload.
+    // Let's add a simple event listener or just reload on focus? 
+    // For Phase 2, let's just rely on the user refreshing or us passing a callback.
+    // Better yet: pass a callback to TaxProfileForm to notify parent?
+    // Or just re-fetch profile every time we render? No.
+
+    // Let's add a refresh trigger.
+    const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+    useEffect(() => {
+        const load = async () => {
+            const p = await import('./store/taxProfileStore').then(m => m.taxProfileStore.getTaxProfile());
+            setProfile(p);
+        };
+        load();
+    }, [refreshTrigger]);
+
     const stats = useMemo(() => {
         const periodTransactions = transactions.filter(t => t.date.startsWith(month));
 
@@ -42,23 +71,32 @@ export const TaxCalculationModule: React.FC = () => {
             else if (t.type === 'impuesto') taxPaid += t.amount;
         });
 
-        const taxBase = Math.max(0, income - expenses);
-        const estimatedIva = taxBase * IVA_RATE;
-        const estimatedIsr = taxBase * 0.30; // Simplified 30% ISR
-        const totalEstimatedTax = estimatedIva + estimatedIsr;
-        const netPayable = Math.max(0, totalEstimatedTax - taxPaid);
+        // Use Calculator Strategy
+        // We need to use the imported factory. Since it's a synchronous helper, we can just import it at top level.
+        // But to avoid circular deps or just for cleanliness, let's import it at top level.
+        const calculator = getCalculatorForRegimen(profile?.regimenFiscal);
+
+        const baseResult = calculator.calculateBase({ income, expenses });
+        const taxResult = calculator.calculateTaxes({
+            taxableBase: baseResult.taxableBase,
+            ivaBase: baseResult.ivaBase,
+            income,
+            expenses
+        });
+
+        const netPayable = Math.max(0, taxResult.total - taxPaid);
 
         return {
             income,
             expenses,
-            taxBase,
-            estimatedIva,
-            estimatedIsr,
-            totalEstimatedTax,
+            taxBase: baseResult.taxableBase,
+            estimatedIva: taxResult.iva,
+            estimatedIsr: taxResult.isr,
+            totalEstimatedTax: taxResult.total,
             taxPaid,
             netPayable
         };
-    }, [transactions, month]);
+    }, [transactions, month, profile]);
 
     const formatCurrency = (val: number) => val.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
@@ -85,6 +123,10 @@ export const TaxCalculationModule: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="md:col-span-3">
+                    <TaxProfileForm onProfileSaved={() => setRefreshTrigger(prev => prev + 1)} />
+                </div>
+
                 {/* Base Calculation */}
                 <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
                     <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Base Gravable</h3>

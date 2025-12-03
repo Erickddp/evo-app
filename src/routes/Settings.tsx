@@ -5,10 +5,16 @@ import { dataStore } from '../core/data/dataStore';
 export function Settings() {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const handleClearData = () => {
+    const handleClearData = async () => {
         if (window.confirm('Are you sure you want to clear all local data? This action cannot be undone.')) {
-            localStorage.clear();
-            window.location.reload();
+            try {
+                await dataStore.clearAll();
+                localStorage.clear();
+                window.location.reload();
+            } catch (error) {
+                console.error('Failed to clear data:', error);
+                alert('Failed to clear some data. Please try again.');
+            }
         }
     };
 

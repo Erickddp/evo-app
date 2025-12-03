@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DollarSign, TrendingUp, TrendingDown } from 'lucide-react';
 import { dataStore } from '../../data/dataStore';
-import type { Movement as IngresosMovement } from '../../../modules/ingresos-manager/index';
+import { type EvoTransaction, calculateTotals } from '../../domain/evo-transaction';
 
 interface IncomeStats {
     totalIncome: number;
@@ -17,17 +17,19 @@ export function FinancialSummaryWidget() {
         let isMounted = true;
         async function load() {
             try {
-                const records = await dataStore.listRecords<{ movements: IngresosMovement[] }>('ingresos-manager');
+                const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
                 if (!isMounted || records.length === 0) return;
 
                 const last = records[records.length - 1];
-                const payload = (last.payload || {}) as any;
+                const transactions = last.payload.transactions || [];
+
+                const totals = calculateTotals(transactions);
 
                 setStats({
-                    totalIncome: Number(payload.stats?.totalIncome) || 0,
-                    totalExpense: Number(payload.stats?.totalExpense) || 0,
-                    netBalance: Number(payload.stats?.netBalance) || 0,
-                    movementsCount: Number(payload.movementsCount) || 0,
+                    totalIncome: totals.totalIncome,
+                    totalExpense: totals.totalExpense,
+                    netBalance: totals.netBalance,
+                    movementsCount: transactions.length,
                 });
             } catch (e) {
                 console.error(e);

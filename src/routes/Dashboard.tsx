@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, X, GripVertical, Check } from 'lucide-react';
+import { Settings, X, Check } from 'lucide-react';
 import { dataStore } from '../core/data/dataStore';
 import { registerWidget, getWidget, getAllWidgets } from '../core/dashboard/registry';
 import { type DashboardConfig, DEFAULT_DASHBOARD_CONFIG } from '../core/dashboard/types';

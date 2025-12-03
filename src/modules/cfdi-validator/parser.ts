@@ -157,7 +157,7 @@ export function parseCfdiXml(xmlContent: string, fileName: string, targetRfc?: s
         const node = impuestosNodes[i];
         // Check if this node belongs to Comprobante (parent is Comprobante)
         // In DOMParser, we can check parentNode.
-        if (node.parentNode?.nodeName === "cfdi:Comprobante" || node.parentNode?.localName === "Comprobante") {
+        if (node.parentNode?.nodeName === "cfdi:Comprobante" || (node.parentNode as Element)?.localName === "Comprobante") {
             const trasladados = getAttr(node, "TotalImpuestosTrasladados");
             const retenidos = getAttr(node, "TotalImpuestosRetenidos");
 

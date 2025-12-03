@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, TrendingUp, DollarSign, Info } from 'lucide-react';
 import { dataStore } from '../../core/data/dataStore';
 import { type EvoTransaction, createEvoTransaction } from '../../core/domain/evo-transaction';
-import { TaxIncomeChart } from './components/TaxIncomeChart';
+
 
 // --- Constants ---
 const IVA_RATE = 0.16;

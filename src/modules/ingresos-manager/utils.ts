@@ -1,106 +1,175 @@
 import { type EvoTransaction, createEvoTransaction } from '../../core/domain/evo-transaction';
 
-export function parseIngresosCsv(content: string): EvoTransaction[] {
+export interface ImportResult {
+    movements: EvoTransaction[];
+    stats: {
+        totalRows: number;
+        imported: number;
+        ignored: number;
+        errors: number;
+        errorDetails: string[];
+    };
+}
+
+export function parseIngresosCsv(content: string): ImportResult {
     const lines = content.split(/\r?\n/);
-    if (lines.length < 2) return [];
+    const result: ImportResult = {
+        movements: [],
+        stats: {
+            totalRows: 0,
+            imported: 0,
+            ignored: 0,
+            errors: 0,
+            errorDetails: []
+        }
+    };
+
+    if (lines.length < 2) return result;
 
     const headerLine = lines[0].toLowerCase();
     const headers = headerLine.split(',').map(h => h.trim().replace(/"/g, ''));
 
-    // Schema A: New Standard (Fecha, Concepto, Ingreso, Gasto)
-    const idxFecha = headers.findIndex(h => h === 'fecha');
-    const idxConcepto = headers.findIndex(h => h === 'concepto');
-    const idxIngreso = headers.findIndex(h => h === 'ingreso');
-    const idxGasto = headers.findIndex(h => h === 'gasto');
+    // Strict Schema: Fecha, Concepto, Ingreso, Gasto
+    const idxFecha = headers.findIndex(h => h.includes('fecha'));
+    const idxConcepto = headers.findIndex(h => h.includes('concepto'));
+    const idxIngreso = headers.findIndex(h => h.includes('ingreso'));
+    const idxGasto = headers.findIndex(h => h.includes('gasto'));
 
-    // Schema B: Old/Compatible (Fecha, Concepto, Monto, Tipo)
-    const idxMonto = headers.findIndex(h => h === 'monto');
-    const idxTipo = headers.findIndex(h => h === 'tipo');
+    const isValidSchema = idxFecha !== -1 && idxConcepto !== -1 && idxIngreso !== -1 && idxGasto !== -1;
 
-    const isNewSchema = idxFecha !== -1 && idxConcepto !== -1 && idxIngreso !== -1 && idxGasto !== -1;
-    const isOldSchema = idxFecha !== -1 && idxConcepto !== -1 && idxMonto !== -1 && idxTipo !== -1;
-
-    if (!isNewSchema && !isOldSchema) {
-        throw new Error('Formato de CSV no reconocido. Se espera: Fecha, Concepto, Ingreso, Gasto');
+    if (!isValidSchema) {
+        throw new Error('Formato de CSV no reconocido. Se espera exactamente: Fecha, Concepto, Ingreso, Gasto');
     }
 
-    const newMovements: EvoTransaction[] = [];
+    // Helper to parse a CSV line handling quotes
+    const parseLine = (text: string): string[] => {
+        const result: string[] = [];
+        let cur = '';
+        let inQuote = false;
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            if (char === '"') {
+                inQuote = !inQuote;
+            } else if (char === ',' && !inQuote) {
+                result.push(cur);
+                cur = '';
+            } else {
+                cur += char;
+            }
+        }
+        result.push(cur);
+        return result;
+    };
 
-    for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
+    // We start from 1 to skip header
+    // We filter out completely empty lines from the loop but count them in totalRows if they were in the file?
+    // Actually, usually empty lines at end of file are just artifacts. Let's count non-empty lines.
 
-        const cols = line.split(',');
+    const dataLines = lines.slice(1).filter(l => l.trim().length > 0);
+    result.stats.totalRows = dataLines.length;
 
-        const cleanText = (str: string | undefined) => {
-            return str ? str.replace(/^"|"$/g, '').trim() : '';
-        };
+    for (let i = 0; i < dataLines.length; i++) {
+        const line = dataLines[i];
+        const rowNum = i + 2; // 1-based index, +1 for header
 
-        const parseCurrency = (str: string | undefined) => {
-            if (!str) return 0;
-            const clean = str.replace(/["$,\s]/g, '');
-            const val = parseFloat(clean);
-            return isNaN(val) ? 0 : val;
-        };
+        try {
+            const cols = parseLine(line);
 
-        let dateStr = '';
-        let conceptStr = '';
-        let amount = 0;
-        let type: 'ingreso' | 'gasto' = 'ingreso'; // Default, will be set correctly
+            const cleanText = (str: string | undefined) => {
+                return str ? str.replace(/^"|"$/g, '').replace(/""/g, '"').trim() : '';
+            };
 
-        if (isNewSchema) {
-            dateStr = cleanText(cols[idxFecha]);
-            conceptStr = cleanText(cols[idxConcepto]);
+            const parseCurrency = (str: string | undefined) => {
+                if (!str) return 0;
+                const clean = str.replace(/["$,\s]/g, ''); // Remove quotes, currency symbols, commas, spaces
+                const val = parseFloat(clean);
+                return isNaN(val) ? 0 : val;
+            };
+
+            const dateStrRaw = cleanText(cols[idxFecha]);
+            const conceptStr = cleanText(cols[idxConcepto]);
             const ingresoVal = parseCurrency(cols[idxIngreso]);
             const gastoVal = parseCurrency(cols[idxGasto]);
 
-            if (ingresoVal === 0 && gastoVal === 0) continue;
+            // Logic:
+            // If Ingreso > 0 -> Ingreso
+            // If Gasto > 0 -> Gasto
+            // If both > 0 -> Error/Warn? User didn't specify, but usually one per row. Let's prioritize Ingreso or just take the larger?
+            // User said: "Si Ingreso > 0 y Gasto vacío -> ingreso", "Si Gasto > 0 y Ingreso vacío -> gasto".
+            // "Si ambas columnas están vacías -> se puede ignorar la fila".
 
-            if (ingresoVal > 0) {
+            const hasIngreso = ingresoVal > 0;
+            const hasGasto = gastoVal > 0;
+
+            if (!hasIngreso && !hasGasto) {
+                result.stats.ignored++;
+                // result.stats.errorDetails.push(`Fila ${rowNum}: Sin importe (Ingreso y Gasto vacíos/cero).`);
+                continue;
+            }
+
+            let amount = 0;
+            let type: 'ingreso' | 'gasto' = 'ingreso';
+
+            if (hasIngreso && hasGasto) {
+                // Edge case: both present. Let's assume it's a split or error. 
+                // For now, let's log it and maybe pick the one that matches the column concept? 
+                // Or just treat as Ingreso if Ingreso > 0?
+                // Let's assume it's an error for now to be safe, or just pick Ingreso.
+                // User didn't specify strictness here. Let's pick Ingreso.
                 amount = ingresoVal;
                 type = 'ingreso';
-            } else if (gastoVal > 0) {
+                // result.stats.errorDetails.push(`Fila ${rowNum}: Ambos valores presentes. Se tomó Ingreso.`);
+            } else if (hasIngreso) {
+                amount = ingresoVal;
+                type = 'ingreso';
+            } else {
                 amount = gastoVal;
                 type = 'gasto';
             }
 
-            if (gastoVal > 0 && ingresoVal > 0) {
-                if (gastoVal > ingresoVal) {
-                    amount = gastoVal;
-                    type = 'gasto';
+            // Date Parsing
+            let dateStr = dateStrRaw;
+            // Try to handle DD/MM/YYYY or DD-MM-YYYY which are common in CSVs
+            if (!dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                // Try parsing common formats
+                const parts = dateStr.split(/[-/]/);
+                if (parts.length === 3) {
+                    // Check if it's DD/MM/YYYY (day first)
+                    // Heuristic: if first part > 12, it's definitely day.
+                    // If year is last (4 digits).
+                    const p1 = parseInt(parts[0]);
+                    const p2 = parseInt(parts[1]);
+                    const p3 = parseInt(parts[2]);
+
+                    if (parts[2].length === 4) {
+                        // DD-MM-YYYY or MM-DD-YYYY
+                        // Assume DD-MM-YYYY for ES locale usually
+                        const day = p1;
+                        const month = p2;
+                        const year = p3;
+                        dateStr = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+                    }
+                }
+
+                // Fallback to Date parse
+                const d = new Date(dateStr);
+                if (!isNaN(d.getTime())) {
+                    dateStr = d.toISOString().split('T')[0];
+                } else if (dateStr !== dateStrRaw) {
+                    // We manually parsed it above
                 } else {
-                    amount = ingresoVal;
-                    type = 'ingreso';
+                    result.stats.errors++;
+                    result.stats.errorDetails.push(`Fila ${rowNum}: Fecha inválida '${dateStrRaw}'.`);
+                    continue;
                 }
             }
 
-        } else {
-            // Old Schema
-            dateStr = cleanText(cols[idxFecha]);
-            conceptStr = cleanText(cols[idxConcepto]);
-            const montoVal = parseCurrency(cols[idxMonto]);
-            const tipoStr = cleanText(cols[idxTipo]).toLowerCase();
-
-            if (tipoStr.includes('gasto') || tipoStr.includes('expense')) {
-                amount = Math.abs(montoVal);
-                type = 'gasto';
-            } else {
-                amount = Math.abs(montoVal);
-                type = 'ingreso';
+            if (!conceptStr) {
+                result.stats.errors++;
+                result.stats.errorDetails.push(`Fila ${rowNum}: Concepto vacío.`);
+                continue;
             }
-        }
 
-        // Date Parsing
-        if (!dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-            const d = new Date(dateStr);
-            if (!isNaN(d.getTime())) {
-                dateStr = d.toISOString().split('T')[0];
-            }
-        }
-
-        if (!dateStr || !conceptStr || amount <= 0) continue;
-
-        try {
             const movement = createEvoTransaction({
                 date: dateStr,
                 concept: conceptStr,
@@ -108,11 +177,14 @@ export function parseIngresosCsv(content: string): EvoTransaction[] {
                 type: type,
                 source: 'manual-csv'
             });
-            newMovements.push(movement);
-        } catch (e) {
-            console.warn('Skipping invalid movement:', e);
+            result.movements.push(movement);
+            result.stats.imported++;
+
+        } catch (e: any) {
+            result.stats.errors++;
+            result.stats.errorDetails.push(`Fila ${rowNum}: Error inesperado (${e.message}).`);
         }
     }
 
-    return newMovements;
+    return result;
 }
