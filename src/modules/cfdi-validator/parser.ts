@@ -15,9 +15,15 @@ export interface CfdiSummary {
     subtotal?: string;
     total?: string;
     tipoComprobante?: string;
+    // New fields
+    type: 'Emitted' | 'Received' | 'Unknown';
+    status: 'Valid' | 'Invalid'; // Simple status based on parsing success
+    conceptCount: number;
+    totalImpuestosTrasladados: number;
+    totalImpuestosRetenidos: number;
 }
 
-export function parseCfdiXml(xmlContent: string, fileName: string): CfdiSummary {
+export function parseCfdiXml(xmlContent: string, fileName: string, targetRfc?: string): CfdiSummary {
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xmlContent, "text/xml");
 
@@ -27,22 +33,13 @@ export function parseCfdiXml(xmlContent: string, fileName: string): CfdiSummary 
         throw new Error(`Error parsing XML file: ${fileName}`);
     }
 
-    // Helper to get attribute from node (handling namespaces loosely if needed, but standard DOM methods usually work)
-    // We will look for elements by tag name, ignoring namespace prefix if possible or using getElementsByTagNameNS if we knew the exact NS URI.
-    // Since NS URIs can vary (though standard), simple getElementsByTagName is often enough if we just want the local name, 
-    // but in XML with namespaces, getElementsByTagName("cfdi:Comprobante") might not work in all browsers/modes same way.
-    // However, standard practice for CFDI is usually strict. Let's try to be robust.
-    // A robust way without hardcoding NS URIs for every single tag is to search by local name or try both prefixed and non-prefixed.
-    // But standard DOM `getElementsByTagName` returns all elements with the given tag name. 
-    // In HTML documents invoke it with lower case, in XML it is case-sensitive.
-    // CFDI tags are usually PascalCase (Comprobante, Emisor, etc).
+    // Helper to get attribute from node
+    const getAttr = (el: Element, name: string) => el.getAttribute(name) || undefined;
 
-    // Let's try to find the root Comprobante
+    // Root Comprobante
     let comprobante = xmlDoc.getElementsByTagName("cfdi:Comprobante")[0];
     if (!comprobante) {
-        // Fallback: try without prefix or with different prefix if user has weird XML
-        // But strictly speaking valid CFDI uses cfdi:Comprobante. 
-        // Let's try local name check if standard fails.
+        // Fallback for local name
         const all = xmlDoc.getElementsByTagName("*");
         for (let i = 0; i < all.length; i++) {
             if (all[i].localName === "Comprobante") {
@@ -56,9 +53,6 @@ export function parseCfdiXml(xmlContent: string, fileName: string): CfdiSummary 
         throw new Error("Missing <cfdi:Comprobante> node");
     }
 
-    const getAttr = (el: Element, name: string) => el.getAttribute(name) || undefined;
-
-    // Comprobante attributes
     const summary: CfdiSummary = {
         fileName,
         serie: getAttr(comprobante, "Serie"),
@@ -70,6 +64,11 @@ export function parseCfdiXml(xmlContent: string, fileName: string): CfdiSummary 
         tipoComprobante: getAttr(comprobante, "TipoDeComprobante"),
         formaPago: getAttr(comprobante, "FormaPago"),
         metodoPago: getAttr(comprobante, "MetodoPago"),
+        type: 'Unknown',
+        status: 'Valid',
+        conceptCount: 0,
+        totalImpuestosTrasladados: 0,
+        totalImpuestosRetenidos: 0
     };
 
     // Emisor
@@ -105,11 +104,37 @@ export function parseCfdiXml(xmlContent: string, fileName: string): CfdiSummary 
         summary.usoCfdi = getAttr(receptor, "UsoCFDI");
     }
 
-    // TimbreFiscalDigital (usually in Complemento)
-    // Namespace is usually tfd
+    // Classification Logic
+    if (targetRfc) {
+        const normalizedTarget = targetRfc.toUpperCase().trim();
+        const emisorRfc = summary.emisorRfc?.toUpperCase().trim();
+        const receptorRfc = summary.receptorRfc?.toUpperCase().trim();
+
+        if (emisorRfc === normalizedTarget) {
+            summary.type = 'Emitted';
+        } else if (receptorRfc === normalizedTarget) {
+            summary.type = 'Received';
+        }
+    }
+
+    // Concepts Count
+    let conceptos = xmlDoc.getElementsByTagName("cfdi:Conceptos")[0];
+    if (!conceptos) {
+        const all = xmlDoc.getElementsByTagName("*");
+        for (let i = 0; i < all.length; i++) {
+            if (all[i].localName === "Conceptos") {
+                conceptos = all[i];
+                break;
+            }
+        }
+    }
+    if (conceptos) {
+        summary.conceptCount = conceptos.children.length; // Approximate count of Concepto children
+    }
+
+    // TimbreFiscalDigital
     let timbre = xmlDoc.getElementsByTagName("tfd:TimbreFiscalDigital")[0];
     if (!timbre) {
-        // Try finding by localName "TimbreFiscalDigital"
         const all = xmlDoc.getElementsByTagName("*");
         for (let i = 0; i < all.length; i++) {
             if (all[i].localName === "TimbreFiscalDigital") {
@@ -120,6 +145,26 @@ export function parseCfdiXml(xmlContent: string, fileName: string): CfdiSummary 
     }
     if (timbre) {
         summary.uuid = getAttr(timbre, "UUID");
+    }
+
+    // Impuestos (Global totals usually in cfdi:Impuestos at root level, not concept level)
+    // Note: There can be multiple Impuestos nodes (one inside Comprobante, others inside Concepto).
+    // We want the one that is a direct child of Comprobante or at least not inside Conceptos.
+    // A simple heuristic: find cfdi:Impuestos that has TotalImpuestosTrasladados or TotalImpuestosRetenidos attributes.
+
+    const impuestosNodes = xmlDoc.getElementsByTagName("cfdi:Impuestos");
+    for (let i = 0; i < impuestosNodes.length; i++) {
+        const node = impuestosNodes[i];
+        // Check if this node belongs to Comprobante (parent is Comprobante)
+        // In DOMParser, we can check parentNode.
+        if (node.parentNode?.nodeName === "cfdi:Comprobante" || node.parentNode?.localName === "Comprobante") {
+            const trasladados = getAttr(node, "TotalImpuestosTrasladados");
+            const retenidos = getAttr(node, "TotalImpuestosRetenidos");
+
+            if (trasladados) summary.totalImpuestosTrasladados = parseFloat(trasladados);
+            if (retenidos) summary.totalImpuestosRetenidos = parseFloat(retenidos);
+            break; // Found the global tax summary
+        }
     }
 
     return summary;

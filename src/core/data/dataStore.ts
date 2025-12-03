@@ -21,6 +21,7 @@ export interface DataStore {
     listRecords<T = unknown>(toolId?: ToolId): Promise<StoredRecord<T>[]>;
     clearAll(): Promise<void>;
     exportAllAsCsv(): Promise<string>;
+    exportToCSVBlob(): Promise<Blob>;
     importFromCsv(csvText: string, options?: { clearBefore?: boolean }): Promise<ImportResult>;
 }
 
@@ -90,7 +91,10 @@ class LocalStorageDataStore implements DataStore {
             content = content.slice(1);
         }
 
-        const lines = content.split(/\r?\n/);
+        // Normalize newlines to \n
+        content = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+        const lines = this.splitCsvLines(content);
 
         // Filter out empty lines
         const nonEmptyLines = lines.filter(line => line.trim().length > 0);
@@ -110,11 +114,20 @@ class LocalStorageDataStore implements DataStore {
         const headerColumns = this.parseCsvLine(headerLine, delimiter);
 
         // Basic validation: check if all expected columns are present
-        const missingColumns = expectedColumns.filter(col => !headerColumns.includes(col));
+        // We trim headers to be safe against extra whitespace
+        const normalizedHeaderColumns = headerColumns.map(h => h.trim());
+        const missingColumns = expectedColumns.filter(col => !normalizedHeaderColumns.includes(col));
+
         if (missingColumns.length > 0) {
             result.errors.push(`Invalid header. Missing columns: ${missingColumns.join(', ')}`);
             return result;
         }
+
+        // Map header indices
+        const colMap = new Map<string, number>();
+        normalizedHeaderColumns.forEach((col, index) => {
+            colMap.set(col, index);
+        });
 
         const records: StoredRecord[] = [];
         const existingRecords = options?.clearBefore === false ? this.getRecords() : [];
@@ -128,13 +141,16 @@ class LocalStorageDataStore implements DataStore {
             try {
                 const columns = this.parseCsvLine(line, delimiter);
 
-                if (columns.length < 5) {
-                    throw new Error(`Invalid column count. Expected at least 5, got ${columns.length}`);
+                // We need at least the required columns
+                if (columns.length < expectedColumns.length) {
+                    throw new Error(`Invalid column count. Expected at least ${expectedColumns.length}, got ${columns.length}`);
                 }
 
-                // Map columns based on header position (in case order changes, though we enforce schema)
-                // For now, assume fixed order as per requirement: id, toolId, createdAt, updatedAt, payload_json
-                const [id, toolId, createdAt, updatedAt, payloadJson] = columns;
+                const id = columns[colMap.get('id')!]?.trim();
+                const toolId = columns[colMap.get('toolId')!]?.trim();
+                const createdAt = columns[colMap.get('createdAt')!]?.trim();
+                const updatedAt = columns[colMap.get('updatedAt')!]?.trim();
+                const payloadJson = columns[colMap.get('payload_json')!]; // Don't trim payload JSON as it might be significant
 
                 if (!id || !toolId || !createdAt || !updatedAt || !payloadJson) {
                     throw new Error('Missing required fields');
@@ -200,14 +216,46 @@ class LocalStorageDataStore implements DataStore {
         return [header.join(','), ...rows].join('\n');
     }
 
+    async exportToCSVBlob(): Promise<Blob> {
+        const csvContent = await this.exportAllAsCsv();
+        // Add BOM for Excel compatibility
+        const BOM = '\uFEFF';
+        return new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    }
+
     private escapeCsvField(field: string): string {
         if (field === null || field === undefined) return '';
         const stringField = String(field);
         // If field contains comma, quote, or newline, wrap in quotes and escape internal quotes
-        if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n') || stringField.includes('\r')) {
+        if (stringField.includes(',') || stringField.includes('"') || stringField.includes('\n') || stringField.includes('\r') || stringField.includes(';')) {
             return `"${stringField.replace(/"/g, '""')}"`;
         }
         return stringField;
+    }
+
+    // Robust CSV line splitter that respects quotes
+    private splitCsvLines(content: string): string[] {
+        const lines: string[] = [];
+        let currentLine = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < content.length; i++) {
+            const char = content[i];
+
+            if (char === '"') {
+                inQuotes = !inQuotes;
+                currentLine += char;
+            } else if (char === '\n' && !inQuotes) {
+                lines.push(currentLine);
+                currentLine = '';
+            } else {
+                currentLine += char;
+            }
+        }
+        if (currentLine) {
+            lines.push(currentLine);
+        }
+        return lines;
     }
 
     private parseCsvLine(line: string, delimiter: string): string[] {

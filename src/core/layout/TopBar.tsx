@@ -1,14 +1,28 @@
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Sun, Menu } from 'lucide-react';
 import { useTheme } from '../theme/ThemeProvider';
 
-export function TopBar() {
+interface TopBarProps {
+    toggleSidebar: () => void;
+}
+
+export function TopBar({ toggleSidebar }: TopBarProps) {
     const { resolvedTheme, toggleTheme } = useTheme();
 
     return (
         <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-6 transition-colors duration-200">
-            <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200">
-                Welcome Back
-            </h2>
+            <div className="flex items-center gap-4">
+                <button
+                    onClick={toggleSidebar}
+                    className="md:hidden p-2 -ml-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition-colors"
+                    aria-label="Open menu"
+                >
+                    <Menu size={24} />
+                </button>
+
+                <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200">
+                    Welcome Back
+                </h2>
+            </div>
 
             <button
                 onClick={toggleTheme}
