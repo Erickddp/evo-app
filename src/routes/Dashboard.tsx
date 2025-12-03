@@ -44,6 +44,12 @@ export function Dashboard() {
     const [taxStats, setTaxStats] = useState<TaxDashboardStats | null>(null);
     const [cfdiStats, setCfdiStats] = useState<CfdiDashboardStats | null>(null);
     const [finSummaryStats, setFinSummaryStats] = useState<FinancialSummaryDashboardStats | null>(null);
+    const [facturasStats, setFacturasStats] = useState<{
+        count: number;
+        amount: number;
+        pendingCount: number;
+        pendingAmount: number;
+    } | null>(null);
 
     useEffect(() => {
         let isMounted = true;
@@ -56,7 +62,6 @@ export function Dashboard() {
 
                 if (isMounted && Array.isArray(incomeRecords) && incomeRecords.length > 0) {
                     const last = incomeRecords[incomeRecords.length - 1];
-                    // Safely cast and provide defaults
                     const payload = (last.payload || {}) as any;
                     setIncomeStats({
                         totalIncome: Number(payload.stats?.totalIncome) || 0,
@@ -76,12 +81,6 @@ export function Dashboard() {
 
                 if (isMounted) {
                     const stats = calculateTaxStats(taxPayments);
-                    // Filter monthlySeries to last 6 months for dashboard view if needed, 
-                    // or just use what comes back. The helper returns last 12 months.
-                    // Let's slice it to last 6 to match previous behavior if space is tight, 
-                    // or keep 12. The user didn't specify, but "Sync with Dashboard" implies keeping it working.
-                    // I'll keep all 12, it gives more info.
-
                     setTaxStats(stats);
                 }
 
@@ -116,6 +115,25 @@ export function Dashboard() {
                         invalidCount: invalid,
                         lastRunDate: latest.payload.timestamp
                     });
+                }
+
+                // Load Facturas Stats
+                const facturasRecords = await dataStore.listRecords<any>('facturas-manager');
+                if (isMounted) {
+                    const currentMonth = new Date().toISOString().slice(0, 7);
+                    const invoices = facturasRecords
+                        .filter(r => r.payload.type === 'invoice')
+                        .map(r => r.payload.data);
+
+                    const monthInvoices = invoices.filter((inv: any) => inv.month === currentMonth);
+
+                    const count = monthInvoices.length;
+                    const amount = monthInvoices.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
+                    const pending = monthInvoices.filter((inv: any) => !inv.paid);
+                    const pendingCount = pending.length;
+                    const pendingAmount = pending.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
+
+                    setFacturasStats({ count, amount, pendingCount, pendingAmount });
                 }
 
             } catch (err) {
@@ -178,6 +196,58 @@ export function Dashboard() {
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
                         Almacenamiento local activo y funcionando.
                     </p>
+                </div>
+
+                {/* Facturas Summary */}
+                <div className="group md:col-span-2 rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-all hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400">
+                            <FileText className="h-5 w-5" />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                                Facturación
+                            </h3>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                Basado en el módulo Facturas.
+                            </p>
+                        </div>
+                    </div>
+
+                    {!facturasStats ? (
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                            No hay datos de facturación este mes.
+                        </p>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700">
+                                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
+                                    Facturas este mes
+                                </p>
+                                <div className="flex items-baseline space-x-2">
+                                    <span className="text-2xl font-bold text-gray-900 dark:text-white">
+                                        {facturasStats.count}
+                                    </span>
+                                    <span className="text-sm text-gray-500 dark:text-gray-400">
+                                        · {formatCurrency(facturasStats.amount)}
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-800">
+                                <p className="text-xs font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-1">
+                                    Pendientes de pago
+                                </p>
+                                <div className="flex items-baseline space-x-2">
+                                    <span className="text-2xl font-bold text-amber-700 dark:text-amber-300">
+                                        {facturasStats.pendingCount}
+                                    </span>
+                                    <span className="text-sm text-amber-600 dark:text-amber-400">
+                                        · {formatCurrency(facturasStats.pendingAmount)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* CFDI Validator Summary */}
@@ -428,56 +498,6 @@ export function Dashboard() {
                                         </div>
                                     ))}
                                 </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Financial Summary Card */}
-                <div className="group md:col-span-2 rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-all hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-50 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400">
-                            <Activity className="h-5 w-5" />
-                        </div>
-                        <div>
-                            <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                                Estado de resultados (Mes Actual)
-                            </h3>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                                Resumen rápido de utilidad, ingresos y gastos de este mes.
-                            </p>
-                        </div>
-                    </div>
-
-                    {!finSummaryStats || !finSummaryStats.hasData ? (
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                            Empieza a registrar movimientos para ver tu estado de resultados aquí.
-                        </p>
-                    ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700">
-                                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
-                                    Utilidad Neta
-                                </p>
-                                <p className={`text-xl font-bold ${finSummaryStats.netProfit >= 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-red-600 dark:text-red-400'}`}>
-                                    {formatCurrency(finSummaryStats.netProfit)}
-                                </p>
-                            </div>
-                            <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-800">
-                                <p className="text-xs font-medium text-green-600 dark:text-green-400 uppercase tracking-wider mb-1">
-                                    Ingresos
-                                </p>
-                                <p className="text-xl font-bold text-green-700 dark:text-green-300">
-                                    {formatCurrency(finSummaryStats.income)}
-                                </p>
-                            </div>
-                            <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-800">
-                                <p className="text-xs font-medium text-red-600 dark:text-red-400 uppercase tracking-wider mb-1">
-                                    Gastos
-                                </p>
-                                <p className="text-xl font-bold text-red-700 dark:text-red-300">
-                                    {formatCurrency(finSummaryStats.expenses)}
-                                </p>
                             </div>
                         </div>
                     )}

@@ -1,5 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, ArrowRight, Save, AlertCircle, CheckCircle } from 'lucide-react';
+import { Upload, FileText, ArrowRight, Save, AlertCircle, CheckCircle, Download } from 'lucide-react';
+import { parseBankStatementPdf } from '../../services/bankPdfParser';
+import type { BankMovement as SharedBankMovement } from '../../types/bank';
 import { dataStore } from '../../core/data/dataStore';
 
 // --- Types ---
@@ -20,7 +22,7 @@ interface ColumnMapping {
     amount: number;      // column index
 }
 
-type Step = 'upload' | 'map' | 'review';
+type Step = 'upload' | 'map' | 'review' | 'pdf-preview';
 
 // --- Helper Functions ---
 
@@ -39,7 +41,12 @@ export const BankReconciler: React.FC = () => {
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
     const [errorMessage, setErrorMessage] = useState<string>('');
 
+    const [pdfMovements, setPdfMovements] = useState<SharedBankMovement[]>([]);
+    const [pdfCsvContent, setPdfCsvContent] = useState<string>('');
+    const [isProcessingPdf, setIsProcessingPdf] = useState(false);
+
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const pdfInputRef = useRef<HTMLInputElement>(null);
 
     // --- Handlers ---
 
@@ -53,6 +60,52 @@ export const BankReconciler: React.FC = () => {
             parseCsv(text);
         };
         reader.readAsText(file);
+    };
+
+    const handlePdfFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsProcessingPdf(true);
+        setErrorMessage('');
+        setSaveStatus('idle');
+
+        try {
+            const { movements, csvContent } = await parseBankStatementPdf(file);
+            setPdfMovements(movements);
+            setPdfCsvContent(csvContent);
+            setStep('pdf-preview');
+        } catch (error: any) {
+            setErrorMessage(error.message || 'Error al procesar el PDF.');
+            setSaveStatus('error');
+            setTimeout(() => setSaveStatus('idle'), 5000);
+        } finally {
+            setIsProcessingPdf(false);
+            if (pdfInputRef.current) pdfInputRef.current.value = '';
+        }
+    };
+
+    const handleDownloadCsv = () => {
+        const blob = new Blob([pdfCsvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `bank_statement_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const handleUsePdfMovements = () => {
+        const mapped: BankMovement[] = pdfMovements.map((m, idx) => ({
+            id: `mov-pdf-${Date.now()}-${idx}`,
+            date: m.operationDate,
+            description: m.description,
+            amount: m.amount,
+            type: m.direction === 'abono' ? 'income' : 'expense'
+        }));
+        setMovements(mapped);
+        setStep('review');
     };
 
     const parseCsv = (text: string) => {
@@ -208,12 +261,25 @@ export const BankReconciler: React.FC = () => {
                     >
                         <Upload size={16} /> Upload CSV
                     </button>
+                    <input
+                        type="file"
+                        accept="application/pdf"
+                        ref={pdfInputRef}
+                        className="hidden"
+                        onChange={handlePdfFileChange}
+                    />
                     <button
-                        disabled
-                        className="px-4 py-2 bg-gray-100 text-gray-400 rounded-md cursor-not-allowed border border-gray-200 flex items-center gap-2 text-sm"
-                        title="PDF support will be added later. Use CSV for now."
+                        onClick={() => pdfInputRef.current?.click()}
+                        disabled={isProcessingPdf}
+                        className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        <FileText size={16} /> Upload PDF (coming soon)
+                        {isProcessingPdf ? (
+                            <span>Procesando PDF...</span>
+                        ) : (
+                            <>
+                                <FileText size={16} /> Upload PDF
+                            </>
+                        )}
                     </button>
                 </div>
             </div>
@@ -360,6 +426,87 @@ export const BankReconciler: React.FC = () => {
                             {saveStatus === 'saving' ? 'Saving...' : 'Save to Movements Manager'}
                             {saveStatus !== 'saving' && <Save size={16} />}
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Step: PDF Preview */}
+            {step === 'pdf-preview' && (
+                <div className="space-y-6">
+                    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
+                        <h4 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Vista Previa del PDF</h4>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                            <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                                <div className="text-sm text-blue-600 dark:text-blue-400 font-medium">Movimientos detectados</div>
+                                <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">{pdfMovements.length}</div>
+                            </div>
+                            <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+                                <div className="text-sm text-green-600 dark:text-green-400 font-medium">Abonos</div>
+                                <div className="text-2xl font-bold text-green-700 dark:text-green-300">
+                                    {pdfMovements.filter(m => m.direction === 'abono').length}
+                                </div>
+                            </div>
+                            <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
+                                <div className="text-sm text-red-600 dark:text-red-400 font-medium">Cargos</div>
+                                <div className="text-2xl font-bold text-red-700 dark:text-red-300">
+                                    {pdfMovements.filter(m => m.direction === 'cargo').length}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="overflow-x-auto max-h-[400px] border border-gray-200 dark:border-gray-700 rounded-lg mb-6">
+                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                <thead className="bg-gray-50 dark:bg-gray-900/50 sticky top-0">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Fecha oper.</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Fecha liq.</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Descripción</th>
+                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Monto</th>
+                                        <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tipo</th>
+                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Saldo después</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                    {pdfMovements.map((m, idx) => (
+                                        <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{m.operationDate}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{m.liquidationDate}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{m.description}</td>
+                                            <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium ${m.direction === 'abono' ? 'text-green-600' : 'text-red-600'}`}>
+                                                {formatCurrency(m.amount)}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
+                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${m.direction === 'abono'
+                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                                        : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                                                    }`}>
+                                                    {m.direction === 'abono' ? 'Abono' : 'Cargo'}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500 dark:text-gray-400">
+                                                {m.balanceAfter != null ? formatCurrency(m.balanceAfter) : '-'}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div className="flex justify-end gap-4">
+                            <button
+                                onClick={handleDownloadCsv}
+                                className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm"
+                            >
+                                <Download size={16} /> Descargar CSV
+                            </button>
+                            <button
+                                onClick={handleUsePdfMovements}
+                                className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center gap-2 text-sm"
+                            >
+                                Usar en conciliación <ArrowRight size={16} />
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

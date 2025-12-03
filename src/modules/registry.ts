@@ -4,6 +4,7 @@ import { ingresosManagerDefinition } from './ingresos-manager';
 import { bankReconcilerDefinition } from './bank-reconciler/meta';
 import { taxTrackerDefinition } from './tax-tracker/meta';
 import { financialSummaryDefinition } from './financial-summary/meta';
+import { facturasDefinition } from './facturas/meta';
 
 export const toolsRegistry: ToolDefinition[] = [
     cfdiValidatorDefinition,
@@ -11,6 +12,7 @@ export const toolsRegistry: ToolDefinition[] = [
     bankReconcilerDefinition,
     taxTrackerDefinition,
     financialSummaryDefinition,
+    facturasDefinition,
 ];
 
 export function getToolById(id: string): ToolDefinition | undefined {
