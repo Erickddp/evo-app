@@ -3,8 +3,8 @@ import { Zap, Activity, TrendingUp, TrendingDown, DollarSign, FileText, FileChec
 import { dataStore } from '../core/data/dataStore';
 import type { CfdiSummary } from '../modules/cfdi-validator/parser';
 import type { Movement as IngresosMovement } from '../modules/ingresos-manager/index';
-import type { TaxPayment } from '../modules/tax-tracker/types';
 import { normalizeMovements, calculateFinancialSummary, getPeriodDates } from '../modules/financial-summary/helpers';
+import { sanitizeTaxPayment, calculateTaxStats } from '../modules/tax-tracker/helpers';
 
 interface IncomeDashboardStats {
     totalIncome: number;
@@ -71,66 +71,18 @@ export function Dashboard() {
                 }
 
                 // Load Tax Stats
-                const taxRecords = (await dataStore.listRecords<TaxPayment>('tax-tracker')) || [];
-                const taxPayments = taxRecords.map(r => r.payload);
+                const taxRecords = (await dataStore.listRecords<any>('tax-tracker')) || [];
+                const taxPayments = taxRecords.map(r => sanitizeTaxPayment(r.payload));
 
                 if (isMounted) {
-                    if (Array.isArray(taxRecords) && taxRecords.length > 0) {
-                        const payments = taxPayments.sort((a, b) => a.date.localeCompare(b.date));
+                    const stats = calculateTaxStats(taxPayments);
+                    // Filter monthlySeries to last 6 months for dashboard view if needed, 
+                    // or just use what comes back. The helper returns last 12 months.
+                    // Let's slice it to last 6 to match previous behavior if space is tight, 
+                    // or keep 12. The user didn't specify, but "Sync with Dashboard" implies keeping it working.
+                    // I'll keep all 12, it gives more info.
 
-                        const now = new Date();
-                        const currentYear = now.getFullYear();
-                        const lastYear = currentYear - 1;
-
-                        let currentYearTotal = 0;
-                        let lastYearTotal = 0;
-                        let ivaPaidYear = 0;
-                        let isrPaidYear = 0;
-                        const monthlyMap = new Map<string, number>();
-
-                        // Initialize last 6 months in map to ensure we have entries even if 0
-                        for (let i = 5; i >= 0; i--) {
-                            const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-                            const key = d.toISOString().slice(0, 7); // YYYY-MM
-                            monthlyMap.set(key, 0);
-                        }
-
-                        for (const p of payments) {
-                            if (!p) continue;
-                            const amount = Number(p.amount) || 0;
-                            const pDate = new Date(p.date);
-                            const pYear = pDate.getFullYear();
-                            const monthKey = p.date.slice(0, 7);
-
-                            if (pYear === currentYear) {
-                                currentYearTotal += amount;
-                                if (p.type === 'IVA') ivaPaidYear += amount;
-                                if (p.type === 'ISR') isrPaidYear += amount;
-                            } else if (pYear === lastYear) {
-                                lastYearTotal += amount;
-                            }
-
-                            if (monthlyMap.has(monthKey)) {
-                                monthlyMap.set(monthKey, (monthlyMap.get(monthKey) || 0) + amount);
-                            }
-                        }
-
-                        const monthlySeries = Array.from(monthlyMap.entries())
-                            .map(([month, amount]) => ({ month, amount }))
-                            .sort((a, b) => a.month.localeCompare(b.month));
-
-                        const lastPayment = payments[payments.length - 1];
-
-                        setTaxStats({
-                            currentYearTotal,
-                            lastYearTotal,
-                            monthlySeries,
-                            lastPaymentDate: lastPayment?.date,
-                            lastPaymentAmount: lastPayment ? Number(lastPayment.amount) : undefined,
-                            ivaPaidYear,
-                            isrPaidYear
-                        });
-                    }
+                    setTaxStats(stats);
                 }
 
                 // Calculate Financial Summary (Current Month)

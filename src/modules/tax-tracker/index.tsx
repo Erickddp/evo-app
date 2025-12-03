@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, TrendingUp, DollarSign } from 'lucide-react';
+import { Plus, TrendingUp, DollarSign, Info } from 'lucide-react';
 import { dataStore } from '../../core/data/dataStore';
 import type { TaxPayment, TaxProjection } from './types';
+import { sanitizeTaxPayment } from './helpers';
+import { TaxIncomeChart } from './components/TaxIncomeChart';
 
 // --- Constants ---
 const IVA_RATE = 0.16;
@@ -37,8 +39,8 @@ export const TaxTrackerTool: React.FC = () => {
         const load = async () => {
             try {
                 // Load Tax Payments
-                const records = await dataStore.listRecords<TaxPayment>('tax-tracker');
-                const items = records.map(r => r.payload);
+                const records = await dataStore.listRecords<any>('tax-tracker');
+                const items = records.map(r => sanitizeTaxPayment(r.payload));
                 setPayments(items);
 
                 // Load Ingresos Data for Projections
@@ -86,7 +88,7 @@ export const TaxTrackerTool: React.FC = () => {
             estimatedIva,
             estimatedIsr
         };
-    }, [payments]); // Recalculate if payments change (though strictly depends on ingresos, but we don't have a listener for that yet)
+    }, [payments, ingresosMovements]); // Recalculate if payments change (though strictly depends on ingresos, but we don't have a listener for that yet)
 
     const handleAdd = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -214,6 +216,20 @@ export const TaxTrackerTool: React.FC = () => {
                 </div>
             </div>
 
+            {/* Chart */}
+            <TaxIncomeChart payments={payments} incomeMovements={ingresosMovements} />
+
+            {/* Info Panel */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-xl p-4 flex items-start gap-3">
+                <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+                <div>
+                    <h4 className="text-sm font-medium text-blue-900 dark:text-blue-300">Proyecciones de impuestos</h4>
+                    <p className="text-sm text-blue-700 dark:text-blue-400 mt-1">
+                        Este módulo genera proyecciones de pagos de impuestos con base en tus ingresos y pagos registrados. Son estimaciones históricas, no un cálculo oficial. Úsalas solo como referencia.
+                    </p>
+                </div>
+            </div>
+
             {/* Payment History */}
             <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm">
                 <div className="p-4 border-b border-gray-200 dark:border-gray-700">
@@ -241,20 +257,22 @@ export const TaxTrackerTool: React.FC = () => {
                                     </td>
                                 </tr>
                             ) : (
-                                payments.map((p) => (
-                                    <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{p.date}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{p.concept}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
-                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                                                {p.type}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium text-gray-900 dark:text-white">
-                                            {formatCurrency(p.amount)}
-                                        </td>
-                                    </tr>
-                                ))
+                                payments
+                                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                    .map((p) => (
+                                        <tr key={p.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{p.date}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{p.concept}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
+                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                                                    {p.type}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium text-gray-900 dark:text-white">
+                                                {formatCurrency(p.amount)}
+                                            </td>
+                                        </tr>
+                                    ))
                             )}
                         </tbody>
                     </table>
