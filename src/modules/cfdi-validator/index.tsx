@@ -3,6 +3,8 @@ import { FileCheck, Upload, FileText, AlertCircle, Download, Search, Loader2, Ar
 import type { ToolDefinition } from '../shared/types';
 import { parseCfdiXml, type CfdiSummary } from './parser';
 import { dataStore } from '../../core/data/dataStore';
+import { createEvoTransaction, type EvoTransaction } from '../../core/domain/evo-transaction';
+import { Save } from 'lucide-react';
 
 export const CFDIValidatorTool: React.FC = () => {
     const [files, setFiles] = useState<File[]>([]);
@@ -140,6 +142,77 @@ export const CFDIValidatorTool: React.FC = () => {
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
+    };
+
+    const handleSaveToUnifiedModel = async () => {
+        if (rows.length === 0) return;
+
+        try {
+            // 1. Load existing transactions
+            const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+            let existingTransactions: EvoTransaction[] = [];
+            if (records.length > 0) {
+                // Sort by createdAt descending
+                records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                existingTransactions = records[0].payload.transactions || [];
+            }
+
+            // 2. Convert rows to EvoTransactions
+            const newTransactions: EvoTransaction[] = [];
+            let addedCount = 0;
+
+            for (const row of rows) {
+                // Skip if UUID already exists in metadata of existing transactions
+                const exists = existingTransactions.some(t => t.metadata?.uuid === row.uuid);
+                if (exists) continue;
+
+                // Determine type
+                let type: EvoTransaction['type'] = 'gasto'; // Default
+                if (row.type === 'Emitted') type = 'ingreso';
+                if (row.type === 'Received') type = 'gasto'; // Could be 'compra' or 'gasto'
+
+                // Parse amount
+                const amount = row.total ? parseFloat(row.total) : 0;
+                if (isNaN(amount) || amount === 0) continue;
+
+                const transaction = createEvoTransaction({
+                    date: row.fecha ? row.fecha.split('T')[0] : new Date().toISOString().split('T')[0],
+                    concept: `${row.emisorNombre || row.emisorRfc || 'Desconocido'} - ${row.uuid?.slice(0, 8)}`,
+                    amount: amount,
+                    type: type,
+                    source: 'cfdi',
+                    metadata: {
+                        uuid: row.uuid,
+                        fileName: row.fileName,
+                        emisorRfc: row.emisorRfc,
+                        receptorRfc: row.receptorRfc,
+                        xmlData: row
+                    }
+                });
+
+                newTransactions.push(transaction);
+                addedCount++;
+            }
+
+            if (addedCount === 0) {
+                alert('No hay nuevos movimientos para guardar (posibles duplicados).');
+                return;
+            }
+
+            // 3. Save updated list
+            const updatedTransactions = [...existingTransactions, ...newTransactions];
+            await dataStore.saveRecord('evo-transactions', {
+                transactions: updatedTransactions,
+                updatedAt: new Date().toISOString(),
+                count: updatedTransactions.length
+            });
+
+            alert(`Se guardaron ${addedCount} movimientos exitosamente.`);
+
+        } catch (e) {
+            console.error('Error saving to unified model', e);
+            alert('Error al guardar movimientos.');
+        }
     };
 
     const handleSort = (key: keyof CfdiSummary) => {
@@ -305,6 +378,14 @@ export const CFDIValidatorTool: React.FC = () => {
                             <Download className="w-4 h-4" />
                             Exportar CSV
                         </button>
+                        <button
+                            onClick={handleSaveToUnifiedModel}
+                            disabled={rows.length === 0}
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 transition-colors text-sm font-medium"
+                        >
+                            <Save className="w-4 h-4" />
+                            Guardar en Movimientos
+                        </button>
                     </div>
 
                     <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
@@ -393,7 +474,7 @@ export const CFDIValidatorTool: React.FC = () => {
 export const cfdiValidatorDefinition: ToolDefinition = {
     meta: {
         id: 'cfdi-validator',
-        name: 'Validador CFDI',
+        name: 'Validador de Facturas',
         description: 'Valida estructura y firma de archivos XML CFDI 3.3/4.0.',
         icon: FileCheck,
         version: '1.1.0',

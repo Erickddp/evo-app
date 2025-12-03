@@ -14,28 +14,28 @@ export interface Client {
 export interface Invoice {
     id: string;
     folio: string;
-    invoiceDate: string; // YYYY-MM-DD
-    serviceDate?: string; // YYYY-MM-DD
-    month: string; // YYYY-MM
+    // Standardized fields
+    invoiceDate: string; // FECHA (YYYY-MM-DD)
+    clientName: string; // CLIENTE
+    rfc: string; // RFC
+    email?: string; // CORREO
+    concept: string; // CONCEPTO
+    amount: number; // MONTO
+    status: string; // ESTADO
+    paymentForm: string; // FORMA_PAGO
+    paymentMethod: string; // METODO_PAGO
+    cfdiUse: string; // USO_CFDI
+    notes?: string; // NOTAS
 
-    // Client snapshot
-    clientName: string;
-    rfc: string;
+    // Legacy/Internal fields (kept for compatibility or derived)
+    serviceDate?: string;
+    month: string;
     address?: string;
     postalCode?: string;
-    email?: string; // Contact
-
-    // Invoice Data
-    amount: number;
     productKey?: string;
-    paymentMethod?: string;
-    paymentForm?: string;
-    cfdiUse?: string;
-    description?: string;
-    professionalId?: string; // Optional identifier
-    taxRegime?: string; // Emisor regime usually, or receptor? User said "regimenFiscalEmisor" and "regimenFiscalReceptor" in first prompt, but in second prompt just "taxRegime". I'll assume receptor's regime for the invoice snapshot or just a general field.
+    taxRegime?: string;
 
-    // Status
+    // Status booleans (can be derived from status string if needed, or kept in sync)
     paid: boolean;
     realized: boolean;
     paymentDate?: string;

@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { useSidebarState } from './useSidebarState';
+import { PageTransition } from './PageTransition';
 
 export function MainLayout() {
     const { isCollapsed, isMobile, isMobileOpen, toggleSidebar, closeMobileSidebar } = useSidebarState();
@@ -21,7 +22,9 @@ export function MainLayout() {
 
                 <main className="flex-1 overflow-auto p-6">
                     <div className="max-w-7xl mx-auto">
-                        <Outlet />
+                        <PageTransition>
+                            <Outlet />
+                        </PageTransition>
                     </div>
                 </main>
             </div>

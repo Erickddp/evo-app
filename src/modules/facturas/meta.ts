@@ -5,7 +5,7 @@ import FacturasModule from './index';
 export const facturasDefinition: ToolDefinition = {
     meta: {
         id: 'facturas-manager',
-        name: 'Facturación CRM',
+        name: 'Facturación y Clientes',
         description: 'Mini CRM para clientes y facturas de ingresos.',
         icon: FileText,
     },

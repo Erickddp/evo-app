@@ -3,6 +3,7 @@ import { Upload, FileText, ArrowRight, Save, AlertCircle, CheckCircle, Download 
 import { parseBankStatementPdf } from '../../services/bankPdfParser';
 import type { BankMovement as SharedBankMovement } from '../../types/bank';
 import { dataStore } from '../../core/data/dataStore';
+import { type EvoTransaction, createEvoTransaction } from '../../core/domain/evo-transaction';
 
 // --- Types ---
 
@@ -102,7 +103,7 @@ export const BankReconciler: React.FC = () => {
             date: m.operationDate,
             description: m.description,
             amount: m.amount,
-            type: m.direction === 'abono' ? 'income' : 'expense'
+            type: m.type === 'ingreso' ? 'income' : 'expense'
         }));
         setMovements(mapped);
         setStep('review');
@@ -184,40 +185,40 @@ export const BankReconciler: React.FC = () => {
     const handleSave = async () => {
         setSaveStatus('saving');
         try {
-            // 1. Load existing Ingresos Manager data
-            const records = await dataStore.listRecords<{ movements: any[] }>('ingresos-manager');
-            // Sort by createdAt descending
-            records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            // 1. Load existing Unified Transactions
+            const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+            let existingTransactions: EvoTransaction[] = [];
+            if (records.length > 0) {
+                records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                existingTransactions = records[0].payload.transactions || [];
+            }
 
-            const existingMovements = records.length > 0 ? (records[0].payload.movements || []) : [];
-
-            // 2. Map new movements
-            const newRecords = movements.map(m => ({
-                id: m.id,
+            // 2. Map new movements to EvoTransaction
+            const newTransactions: EvoTransaction[] = movements.map(m => createEvoTransaction({
+                id: m.id, // Keep generated ID
                 date: m.date,
                 concept: m.description,
-                amount: m.amount
+                amount: Math.abs(m.amount),
+                type: m.type === 'income' ? 'ingreso' : 'gasto',
+                source: 'bank-reconciler',
+                metadata: {
+                    originalAmount: m.amount
+                }
             }));
 
             // 3. Combine and Save Snapshot
-            const combined = [...newRecords, ...existingMovements];
+            const updatedTransactions = [...existingTransactions, ...newTransactions];
 
-            // Calculate stats for the snapshot
-            const totalIncome = combined.reduce((acc, m) => m.amount > 0 ? acc + m.amount : acc, 0);
-            const totalExpense = combined.reduce((acc, m) => m.amount < 0 ? acc + Math.abs(m.amount) : acc, 0);
-            const netBalance = totalIncome - totalExpense;
-
-            await dataStore.saveRecord('ingresos-manager', {
-                movements: combined,
-                stats: { totalIncome, totalExpense, netBalance },
-                movementsCount: combined.length,
+            await dataStore.saveRecord('evo-transactions', {
+                transactions: updatedTransactions,
                 updatedAt: new Date().toISOString(),
+                count: updatedTransactions.length,
             });
 
             // 4. (Optional) Save Bank Reconciler history
             await dataStore.saveRecord('bank-reconciler', {
                 action: 'import',
-                movementsAdded: newRecords.length,
+                movementsAdded: newTransactions.length,
                 timestamp: new Date().toISOString()
             });
 
@@ -444,13 +445,13 @@ export const BankReconciler: React.FC = () => {
                             <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
                                 <div className="text-sm text-green-600 dark:text-green-400 font-medium">Abonos</div>
                                 <div className="text-2xl font-bold text-green-700 dark:text-green-300">
-                                    {pdfMovements.filter(m => m.direction === 'abono').length}
+                                    {pdfMovements.filter(m => m.type === 'ingreso').length}
                                 </div>
                             </div>
                             <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
                                 <div className="text-sm text-red-600 dark:text-red-400 font-medium">Cargos</div>
                                 <div className="text-2xl font-bold text-red-700 dark:text-red-300">
-                                    {pdfMovements.filter(m => m.direction === 'cargo').length}
+                                    {pdfMovements.filter(m => m.type === 'egreso').length}
                                 </div>
                             </div>
                         </div>
@@ -460,7 +461,7 @@ export const BankReconciler: React.FC = () => {
                                 <thead className="bg-gray-50 dark:bg-gray-900/50 sticky top-0">
                                     <tr>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Fecha oper.</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Fecha liq.</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Fecha pub.</th>
                                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Descripción</th>
                                         <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Monto</th>
                                         <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Tipo</th>
@@ -471,21 +472,21 @@ export const BankReconciler: React.FC = () => {
                                     {pdfMovements.map((m, idx) => (
                                         <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{m.operationDate}</td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{m.liquidationDate}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{m.postingDate}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{m.description}</td>
-                                            <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium ${m.direction === 'abono' ? 'text-green-600' : 'text-red-600'}`}>
+                                            <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium ${m.type === 'ingreso' ? 'text-green-600' : 'text-red-600'}`}>
                                                 {formatCurrency(m.amount)}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
-                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${m.direction === 'abono'
-                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                                                        : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${m.type === 'ingreso'
+                                                    ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                                    : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
                                                     }`}>
-                                                    {m.direction === 'abono' ? 'Abono' : 'Cargo'}
+                                                    {m.type === 'ingreso' ? 'Abono' : 'Cargo'}
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500 dark:text-gray-400">
-                                                {m.balanceAfter != null ? formatCurrency(m.balanceAfter) : '-'}
+                                                {m.balance != null ? formatCurrency(m.balance) : '-'}
                                             </td>
                                         </tr>
                                     ))}

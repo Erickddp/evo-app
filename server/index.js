@@ -32,10 +32,10 @@ function isValidMovement(m) {
     return (
         m &&
         typeof m.operationDate === 'string' &&
-        typeof m.liquidationDate === 'string' &&
+        typeof m.postingDate === 'string' &&
         typeof m.description === 'string' &&
         typeof m.amount === 'number' &&
-        (m.direction === 'cargo' || m.direction === 'abono')
+        (m.type === 'ingreso' || m.type === 'egreso')
     );
 }
 
@@ -68,21 +68,21 @@ You receive the full text of a BBVA bank statement.
    - Convert dates to ISO \`YYYY-MM-DD\` using the period year from the statement (e.g. 2025).
    - Extract:
      - operationDate
-     - liquidationDate
+     - postingDate (previously liquidationDate)
      - description
      - amount (as a number, without thousand separators)
-     - direction: 'cargo' if the amount is in the CARGOS column, 'abono' if in the ABONOS column.
-     - balanceAfter: the balance after the movement if present, otherwise null.
+     - type: 'egreso' if the amount is in the CARGOS column, 'ingreso' if in the ABONOS column.
+     - balance: the balance after the movement if present, otherwise null.
 Return ONLY valid JSON with this shape:
 {
   "movements": [
     {
       "operationDate": "2025-11-01",
-      "liquidationDate": "2025-11-03",
+      "postingDate": "2025-11-03",
       "description": "PAGO CUENTA DE TERCERO",
       "amount": 6000.00,
-      "direction": "cargo",
-      "balanceAfter": 197872.28
+      "type": "egreso",
+      "balance": 197872.28
     }
   ]
 }

@@ -1,5 +1,4 @@
-import type { Movement as IngresosMovement } from '../ingresos-manager/index';
-import type { TaxPayment } from '../tax-tracker/types';
+import { type EvoTransaction } from '../../core/domain/evo-transaction';
 
 export type MovementKind = 'income' | 'expense' | 'tax';
 
@@ -33,33 +32,26 @@ export interface FinancialSummaryState {
 }
 
 export const normalizeMovements = (
-    ingresosMovements: IngresosMovement[],
-    taxPayments: TaxPayment[]
+    transactions: EvoTransaction[]
 ): NormalizedMovement[] => {
     const normalized: NormalizedMovement[] = [];
 
-    // 1. Ingresos Manager
-    ingresosMovements.forEach(m => {
-        normalized.push({
-            id: m.id,
-            date: m.date,
-            concept: m.concept,
-            amount: Math.abs(m.amount),
-            kind: m.amount >= 0 ? 'income' : 'expense',
-            sourceTool: 'ingresos-manager'
-        });
-    });
+    transactions.forEach(t => {
+        let kind: MovementKind | undefined;
+        if (t.type === 'ingreso') kind = 'income';
+        else if (t.type === 'gasto' || t.type === 'pago') kind = 'expense';
+        else if (t.type === 'impuesto') kind = 'tax';
 
-    // 2. Tax Tracker
-    taxPayments.forEach(p => {
-        normalized.push({
-            id: p.id,
-            date: p.date,
-            concept: p.concept,
-            amount: Math.abs(p.amount),
-            kind: 'tax',
-            sourceTool: 'tax-tracker'
-        });
+        if (kind) {
+            normalized.push({
+                id: t.id,
+                date: t.date,
+                concept: t.concept,
+                amount: t.amount,
+                kind,
+                sourceTool: t.source || 'unknown'
+            });
+        }
     });
 
     // Sort by date desc

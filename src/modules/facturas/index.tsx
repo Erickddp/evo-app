@@ -38,12 +38,6 @@ const FacturasModule: React.FC = () => {
         if (!savedClient) {
             await saveClient(client);
         } else {
-            // Update client info if changed? For now, we assume client updates are handled by re-saving.
-            // But useFacturas saveClient appends. 
-            // We should probably check if we need to update.
-            // For simplicity, we just save the invoice which contains the snapshot.
-            // But if we want to update the catalog, we should call saveClient.
-            // Let's assume we update the catalog.
             await saveClient({ ...savedClient, ...client, id: savedClient.id });
         }
 
@@ -59,51 +53,55 @@ const FacturasModule: React.FC = () => {
         setImportMsg('Importando...');
         const res = await importCSV(file);
         setImportMsg(`Importación completada: ${res.imported} facturas nuevas, ${res.skipped} ignoradas.`);
+        if (res.errors.length > 0) {
+            console.warn('Errores de importación:', res.errors);
+            setImportMsg(prev => `${prev} (Ver consola para ${res.errors.length} errores)`);
+        }
         refresh();
         setTimeout(() => setImportMsg(''), 5000);
     };
 
     if (loading) {
-        return <div className="p-6 text-white">Cargando módulo...</div>;
+        return <div className="p-8 text-white text-xl animate-pulse">Cargando módulo de facturación...</div>;
     }
 
     return (
-        <div className="h-full flex flex-col p-6 space-y-6">
-            <div className="flex justify-between items-center">
+        <div className="h-full flex flex-col p-4 md:p-8 space-y-6 w-full max-w-[1920px] mx-auto">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-white">Facturación CRM</h1>
-                    <p className="text-slate-400">Gestiona tus clientes y facturas de ingresos</p>
+                    <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight">Facturación CRM</h1>
+                    <p className="text-slate-400 text-lg mt-1">Gestiona tus clientes y facturas de ingresos</p>
                 </div>
-                <div className="flex space-x-3">
+                <div className="flex flex-wrap gap-3">
                     <button
                         onClick={exportCSV}
-                        className="flex items-center space-x-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-md border border-slate-700"
+                        className="flex items-center space-x-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg border border-slate-700 transition-colors font-medium"
                     >
-                        <Download size={16} />
+                        <Download size={18} />
                         <span>Exportar CSV</span>
                     </button>
-                    <label className="flex items-center space-x-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-md border border-slate-700 cursor-pointer">
-                        <Upload size={16} />
+                    <label className="flex items-center space-x-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg border border-slate-700 cursor-pointer transition-colors font-medium">
+                        <Upload size={18} />
                         <span>Importar CSV</span>
                         <input type="file" accept=".csv" onChange={handleImport} className="hidden" />
                     </label>
                     <button
                         onClick={handleCreateNew}
-                        className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md shadow-md"
+                        className="flex items-center space-x-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg shadow-lg hover:shadow-indigo-500/20 transition-all font-medium"
                     >
-                        <Plus size={16} />
+                        <Plus size={18} />
                         <span>Nueva Factura</span>
                     </button>
                 </div>
             </div>
 
             {importMsg && (
-                <div className="bg-blue-900/50 border border-blue-700 text-blue-200 px-4 py-2 rounded-md">
+                <div className="bg-blue-900/40 border border-blue-500/30 text-blue-100 px-6 py-3 rounded-lg backdrop-blur-sm animate-in fade-in slide-in-from-top-2">
                     {importMsg}
                 </div>
             )}
 
-            <div className="flex-1 bg-slate-900/50 rounded-xl border border-slate-800 p-4 overflow-hidden flex flex-col">
+            <div className="flex-1 bg-slate-900/50 rounded-2xl border border-slate-800/50 p-6 overflow-hidden flex flex-col shadow-xl backdrop-blur-sm">
                 {view === 'list' ? (
                     <InvoiceList invoices={invoices} onSelectInvoice={handleSelectInvoice} />
                 ) : (

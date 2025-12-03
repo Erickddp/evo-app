@@ -5,7 +5,7 @@ import { BankReconciler } from './index.tsx';
 export const bankReconcilerDefinition: ToolDefinition = {
     meta: {
         id: 'bank-reconciler',
-        name: 'Bank Reconciler',
+        name: 'Conciliación Bancaria',
         description: 'Import bank CSV movements and classify incomes/expenses.',
         icon: CreditCard,
         version: '0.1.0',

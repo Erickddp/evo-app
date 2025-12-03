@@ -21,6 +21,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
         amount: 0,
         paid: false,
         realized: false,
+        status: 'Pendiente',
+        concept: '',
+        notes: '',
         ...initialData
     });
 
@@ -96,6 +99,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
             updatedAt: new Date().toISOString()
         };
 
+        const isPaid = formData.paid || false;
+        const status = formData.status || (isPaid ? 'Pagada' : 'Pendiente');
+
         // Construct Invoice
         const invoiceToSave: Invoice = {
             id: formData.id || crypto.randomUUID(),
@@ -112,13 +118,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
             taxRegime: clientToSave.taxRegime,
 
             amount: Number(formData.amount),
+            concept: formData.concept || 'Factura General',
             productKey: formData.productKey,
-            paymentMethod: formData.paymentMethod,
-            paymentForm: formData.paymentForm,
-            cfdiUse: formData.cfdiUse,
-            description: formData.description,
+            paymentMethod: formData.paymentMethod || 'PUE',
+            paymentForm: formData.paymentForm || '99',
+            cfdiUse: formData.cfdiUse || 'G03',
+            notes: formData.notes,
 
-            paid: formData.paid || false,
+            status: status,
+            paid: isPaid,
             realized: formData.realized || false,
             paymentDate: formData.paymentDate,
 
@@ -216,7 +224,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
                         className="mt-1 block w-full bg-slate-900 border-slate-700 rounded-md text-white px-3 py-2"
                     />
                 </div>
-                <div>
+                <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-slate-400">Régimen Fiscal</label>
                     <input
                         type="text"
@@ -229,6 +237,18 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
                 {/* Invoice Details */}
                 <div className="md:col-span-2 border-t border-slate-700 pt-4 mt-2">
                     <h3 className="text-lg font-medium text-white mb-4">Detalles de Factura</h3>
+                </div>
+
+                <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-slate-400">Concepto General</label>
+                    <input
+                        type="text"
+                        value={formData.concept || ''}
+                        onChange={e => setFormData({ ...formData, concept: e.target.value })}
+                        className="mt-1 block w-full bg-slate-900 border-slate-700 rounded-md text-white px-3 py-2"
+                        placeholder="Ej. Servicios de Consultoría"
+                        required
+                    />
                 </div>
 
                 <div>
@@ -274,10 +294,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
                     />
                 </div>
                 <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-slate-400">Descripción / Notas</label>
+                    <label className="block text-sm font-medium text-slate-400">Notas / Observaciones</label>
                     <textarea
-                        value={formData.description || ''}
-                        onChange={e => setFormData({ ...formData, description: e.target.value })}
+                        value={formData.notes || ''}
+                        onChange={e => setFormData({ ...formData, notes: e.target.value })}
                         className="mt-1 block w-full bg-slate-900 border-slate-700 rounded-md text-white px-3 py-2"
                         rows={3}
                     />
@@ -300,7 +320,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
                         <input
                             type="checkbox"
                             checked={formData.paid}
-                            onChange={e => setFormData({ ...formData, paid: e.target.checked })}
+                            onChange={e => {
+                                const isPaid = e.target.checked;
+                                setFormData({
+                                    ...formData,
+                                    paid: isPaid,
+                                    status: isPaid ? 'Pagada' : 'Pendiente'
+                                });
+                            }}
                             className="rounded border-slate-700 bg-slate-900"
                         />
                         <span>Pagada</span>

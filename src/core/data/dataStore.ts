@@ -25,29 +25,46 @@ export interface DataStore {
     importFromCsv(csvText: string, options?: { clearBefore?: boolean }): Promise<ImportResult>;
 }
 
+import { initDB, type EvorixDB } from './db';
+import type { IDBPDatabase } from 'idb';
+
 const STORAGE_KEY = 'evorix-core-data';
 
-class LocalStorageDataStore implements DataStore {
-    private getRecords(): StoredRecord[] {
-        try {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            return raw ? JSON.parse(raw) : [];
-        } catch (e) {
-            console.error('Failed to parse local storage data', e);
-            return [];
-        }
+class IndexedDBDataStore implements DataStore {
+    private dbPromise: Promise<IDBPDatabase<EvorixDB>>;
+
+    constructor() {
+        this.dbPromise = initDB();
+        this.migrateFromLocalStorage();
     }
 
-    private saveRecords(records: StoredRecord[]): void {
+    private async migrateFromLocalStorage() {
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return;
+
+            const records: StoredRecord[] = JSON.parse(raw);
+            if (!Array.isArray(records) || records.length === 0) return;
+
+            console.log(`Migrating ${records.length} records from localStorage to IndexedDB...`);
+            const db = await this.dbPromise;
+            const tx = db.transaction('records', 'readwrite');
+
+            // Use Promise.all to wait for all puts
+            await Promise.all([
+                ...records.map(r => tx.store.put(r)),
+                tx.done
+            ]);
+
+            console.log('Migration complete. Clearing localStorage.');
+            localStorage.removeItem(STORAGE_KEY);
         } catch (e) {
-            console.error('Failed to save to local storage', e);
+            console.error('Migration failed:', e);
         }
     }
 
     async saveRecord<T = unknown>(toolId: ToolId, payload: T): Promise<StoredRecord<T>> {
-        const records = this.getRecords();
+        const db = await this.dbPromise;
         const now = new Date().toISOString();
         const newRecord: StoredRecord<T> = {
             id: crypto.randomUUID(),
@@ -56,21 +73,21 @@ class LocalStorageDataStore implements DataStore {
             updatedAt: now,
             payload,
         };
-        records.push(newRecord);
-        this.saveRecords(records);
+        await db.put('records', newRecord);
         return newRecord;
     }
 
     async listRecords<T = unknown>(toolId?: ToolId): Promise<StoredRecord<T>[]> {
-        const records = this.getRecords();
+        const db = await this.dbPromise;
         if (toolId) {
-            return records.filter((r) => r.toolId === toolId) as StoredRecord<T>[];
+            return (await db.getAllFromIndex('records', 'by-toolId', toolId)) as StoredRecord<T>[];
         }
-        return records as StoredRecord<T>[];
+        return (await db.getAll('records')) as StoredRecord<T>[];
     }
 
     async clearAll(): Promise<void> {
-        localStorage.removeItem(STORAGE_KEY);
+        const db = await this.dbPromise;
+        await db.clear('records');
     }
 
     async importFromCsv(csvText: string, options?: { clearBefore?: boolean }): Promise<ImportResult> {
@@ -129,9 +146,9 @@ class LocalStorageDataStore implements DataStore {
             colMap.set(col, index);
         });
 
-        const records: StoredRecord[] = [];
-        const existingRecords = options?.clearBefore === false ? this.getRecords() : [];
-        const existingIds = new Set(existingRecords.map(r => r.id));
+        const db = await this.dbPromise;
+        const tx = db.transaction('records', 'readwrite');
+        const store = tx.store;
 
         // Process rows (skip header)
         for (let i = 1; i < nonEmptyLines.length; i++) {
@@ -171,16 +188,11 @@ class LocalStorageDataStore implements DataStore {
                     payload
                 };
 
-                // Upsert logic
-                if (existingIds.has(id)) {
-                    const index = existingRecords.findIndex(r => r.id === id);
-                    if (index !== -1) {
-                        existingRecords[index] = record;
-                    }
-                } else {
-                    records.push(record);
-                    existingIds.add(id);
-                }
+                // For bulk import, we just put. IDB put is an upsert.
+                // We await each put to ensure order and error handling per row, 
+                // though Promise.all could be faster for massive datasets.
+                // Given typical usage, sequential is fine and safer for error reporting.
+                await store.put(record);
 
                 result.importedCount++;
             } catch (e) {
@@ -190,12 +202,12 @@ class LocalStorageDataStore implements DataStore {
             }
         }
 
-        this.saveRecords([...existingRecords, ...records]);
+        await tx.done;
         return result;
     }
 
     async exportAllAsCsv(): Promise<string> {
-        const records = this.getRecords();
+        const records = await this.listRecords(); // Get all
         const header = ['id', 'toolId', 'createdAt', 'updatedAt', 'payload_json'];
 
         if (records.length === 0) {
@@ -295,4 +307,4 @@ class LocalStorageDataStore implements DataStore {
     }
 }
 
-export const dataStore: DataStore = new LocalStorageDataStore();
+export const dataStore: DataStore = new IndexedDBDataStore();

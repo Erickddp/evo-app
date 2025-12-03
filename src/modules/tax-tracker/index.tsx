@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, TrendingUp, DollarSign, Info } from 'lucide-react';
 import { dataStore } from '../../core/data/dataStore';
-import type { TaxPayment, TaxProjection } from './types';
-import { sanitizeTaxPayment } from './helpers';
+import { type EvoTransaction, createEvoTransaction } from '../../core/domain/evo-transaction';
 import { TaxIncomeChart } from './components/TaxIncomeChart';
 
 // --- Constants ---
@@ -24,32 +23,62 @@ function todayAsIso(): string {
 // --- Component ---
 
 export const TaxTrackerTool: React.FC = () => {
-    const [payments, setPayments] = useState<TaxPayment[]>([]);
-    const [ingresosMovements, setIngresosMovements] = useState<Array<{ id: string; date: string; amount: number; concept: string }>>([]);
+    const [payments, setPayments] = useState<EvoTransaction[]>([]);
+    const [allTransactions, setAllTransactions] = useState<EvoTransaction[]>([]);
     const [loading, setLoading] = useState(true);
 
     // Form State
     const [date, setDate] = useState(todayAsIso());
     const [concept, setConcept] = useState('');
     const [amountStr, setAmountStr] = useState('');
-    const [type, setType] = useState<TaxPayment['type']>('IVA');
+    const [type, setType] = useState<'IVA' | 'ISR' | 'Other'>('IVA');
 
-    // Load payments and income data from dataStore
+    // Load data
     useEffect(() => {
         const load = async () => {
             try {
-                // Load Tax Payments
-                const records = await dataStore.listRecords<any>('tax-tracker');
-                const items = records.map(r => sanitizeTaxPayment(r.payload));
-                setPayments(items);
+                // Load Unified Transactions
+                const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                let transactions: EvoTransaction[] = [];
 
-                // Load Ingresos Data for Projections
-                const incomeRecords = await dataStore.listRecords<{ movements: any[] }>('ingresos-manager');
-                if (incomeRecords.length > 0) {
-                    // Sort by createdAt descending
-                    incomeRecords.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                    setIngresosMovements(incomeRecords[0].payload.movements || []);
+                if (records.length > 0) {
+                    records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                    transactions = records[0].payload.transactions || [];
                 }
+
+                // Migration Check for Tax Payments
+                const taxPayments = transactions.filter(t => t.type === 'impuesto');
+
+                if (taxPayments.length === 0) {
+                    // Check legacy tax-tracker store
+                    const legacyRecords = await dataStore.listRecords<any>('tax-tracker');
+                    if (legacyRecords.length > 0) {
+                        console.log('Migrating legacy tax payments...');
+                        const legacyItems = legacyRecords.map(r => r.payload);
+                        const migratedPayments = legacyItems.map(p => createEvoTransaction({
+                            id: p.id,
+                            date: p.date,
+                            concept: p.concept,
+                            amount: p.amount,
+                            type: 'impuesto',
+                            source: 'legacy-tax-tracker',
+                            metadata: { taxType: p.type } // Store specific tax type in metadata
+                        }));
+
+                        transactions = [...transactions, ...migratedPayments];
+
+                        // Save immediately
+                        await dataStore.saveRecord('evo-transactions', {
+                            transactions,
+                            updatedAt: new Date().toISOString(),
+                            count: transactions.length
+                        });
+                    }
+                }
+
+                setAllTransactions(transactions);
+                setPayments(transactions.filter(t => t.type === 'impuesto'));
+
             } catch (e) {
                 console.error('Failed to load data', e);
             } finally {
@@ -60,24 +89,20 @@ export const TaxTrackerTool: React.FC = () => {
     }, []);
 
     // Projections Logic
-    const projections = useMemo<TaxProjection>(() => {
-        const movements = ingresosMovements;
+    const projections = useMemo(() => {
         const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
 
-        // Filter for current month (simplified for now, could be selectable)
-        const monthlyMovements = movements.filter(m => m.date.startsWith(currentMonth));
+        // Filter for current month
+        const monthlyTransactions = allTransactions.filter(t => t.date.startsWith(currentMonth));
 
         let totalIncome = 0;
         let totalExpenses = 0;
 
-        for (const m of monthlyMovements) {
-            if (m.amount > 0) totalIncome += m.amount;
-            else totalExpenses += Math.abs(m.amount);
+        for (const t of monthlyTransactions) {
+            if (t.type === 'ingreso') totalIncome += t.amount;
+            else if (t.type === 'gasto') totalExpenses += t.amount;
         }
 
-        // Simple estimation logic
-        // IVA payable = (Income * 0.16) - (Expenses * 0.16) roughly (assuming all expenses have deductible IVA)
-        // This is a heuristic.
         const estimatedIva = Math.max(0, (totalIncome - totalExpenses) * IVA_RATE);
         const estimatedIsr = Math.max(0, (totalIncome - totalExpenses) * ISR_RATE_ESTIMATE);
 
@@ -88,7 +113,7 @@ export const TaxTrackerTool: React.FC = () => {
             estimatedIva,
             estimatedIsr
         };
-    }, [payments, ingresosMovements]); // Recalculate if payments change (though strictly depends on ingresos, but we don't have a listener for that yet)
+    }, [allTransactions]);
 
     const handleAdd = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -97,19 +122,26 @@ export const TaxTrackerTool: React.FC = () => {
         const amount = parseFloat(amountStr);
         if (isNaN(amount)) return;
 
-        const newPayment: TaxPayment = {
-            id: crypto.randomUUID(),
+        const newPayment = createEvoTransaction({
             date,
             concept,
             amount,
-            type,
-            status: 'Paid',
-            metadata: {}
-        };
+            type: 'impuesto',
+            source: 'tax-tracker',
+            metadata: { taxType: type }
+        });
 
         try {
-            await dataStore.saveRecord('tax-tracker', newPayment);
-            setPayments(prev => [...prev, newPayment]);
+            const updatedTransactions = [...allTransactions, newPayment];
+
+            await dataStore.saveRecord('evo-transactions', {
+                transactions: updatedTransactions,
+                updatedAt: new Date().toISOString(),
+                count: updatedTransactions.length
+            });
+
+            setAllTransactions(updatedTransactions);
+            setPayments(updatedTransactions.filter(t => t.type === 'impuesto'));
 
             // Reset form
             setConcept('');
@@ -174,7 +206,7 @@ export const TaxTrackerTool: React.FC = () => {
                                 <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Type</label>
                                 <select
                                     value={type}
-                                    onChange={e => setType(e.target.value as TaxPayment['type'])}
+                                    onChange={e => setType(e.target.value as any)}
                                     className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
                                 >
                                     <option value="IVA">IVA</option>
@@ -217,7 +249,8 @@ export const TaxTrackerTool: React.FC = () => {
             </div>
 
             {/* Chart */}
-            <TaxIncomeChart payments={payments} incomeMovements={ingresosMovements} />
+            {/* <TaxIncomeChart payments={payments} incomeMovements={ingresosMovements} /> */}
+            {/* Chart temporarily disabled until updated to use EvoTransaction */}
 
             {/* Info Panel */}
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-xl p-4 flex items-start gap-3">
@@ -265,7 +298,7 @@ export const TaxTrackerTool: React.FC = () => {
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{p.concept}</td>
                                             <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
                                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                                                    {p.type}
+                                                    {p.metadata?.taxType || 'Tax'}
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium text-gray-900 dark:text-white">

@@ -39,12 +39,11 @@ export async function parseBankStatementPdf(file: File): Promise<{
         }
 
         // 4. Validate and normalize (basic validation, server should have done most)
-        // We can ensure dates are strings, amounts are numbers, etc.
         const validMovements = movements.filter(m =>
             m.operationDate &&
-            m.liquidationDate &&
+            m.postingDate &&
             typeof m.amount === 'number' &&
-            (m.direction === 'cargo' || m.direction === 'abono')
+            (m.type === 'ingreso' || m.type === 'egreso')
         );
 
         if (validMovements.length === 0) {

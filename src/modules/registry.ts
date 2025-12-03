@@ -5,14 +5,16 @@ import { bankReconcilerDefinition } from './bank-reconciler/meta';
 import { taxTrackerDefinition } from './tax-tracker/meta';
 import { financialSummaryDefinition } from './financial-summary/meta';
 import { facturasDefinition } from './facturas/meta';
+import { taxCalculationDefinition } from './tax-calculation';
 
 export const toolsRegistry: ToolDefinition[] = [
     cfdiValidatorDefinition,
     ingresosManagerDefinition,
     bankReconcilerDefinition,
-    taxTrackerDefinition,
-    financialSummaryDefinition,
     facturasDefinition,
+    taxTrackerDefinition,
+    taxCalculationDefinition,
+    financialSummaryDefinition,
 ];
 
 export function getToolById(id: string): ToolDefinition | undefined {

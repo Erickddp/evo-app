@@ -11,3 +11,13 @@ body {
   min-width: 320px;
   min-height: 100vh;
 }
+
+@layer utilities {
+  .btn-press {
+    @apply active:scale-95 transition-transform duration-100;
+  }
+  
+  .card-hover {
+    @apply hover:-translate-y-1 transition-transform duration-300 ease-out;
+  }
+}

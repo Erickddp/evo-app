@@ -1,71 +1,112 @@
 # EVORIX Core
 
-**EVORIX Core** is a modular personal environment designed to host independent fiscal and financial tools. It provides a secure, unified interface with a shared layout, theme management, and error isolation.
+EVORIX Core es una plataforma web modular diseñada para la gestión personal de herramientas fiscales y financieras. Funciona como un “sistema operativo” web: un núcleo (shell) que unifica múltiples aplicaciones independientes, manteniendo consistencia visual, navegación fluida y manejo de errores centralizado.
 
-## Concept
+---
 
-The architecture is built around a **Core** shell and pluggable **Modules** (Tools).
-- **Core**: Handles routing, navigation, theming (dark/light), and global error boundaries.
-- **Modules**: Independent tools that plug into the `toolsRegistry`. Each tool is isolated, so if one crashes, the rest of the app remains functional.
+## 🧩 Arquitectura General
 
-## Project Structure
+### **1. Núcleo (Shell)**
+Ubicado en: `src/core/`
 
-```
-src/
-├── core/           # Layout, Theme, Error handling
-├── modules/        # Independent tools
-│   ├── cfdi-validator/
-│   ├── ingresos-manager/
-│   ├── shared/     # Shared types
-│   └── registry.ts # Tool registration
-├── routes/         # Main pages (Dashboard, ToolsHub, Settings)
-└── App.tsx         # Main entry point
-```
+Responsable de:
+- Layout general
+- Enrutamiento global entre módulos
+- Manejo de tema (oscuro/claro)
+- Límites de error globales
+- Comportamientos compartidos
 
-## How to Run
+El núcleo no depende de ningún módulo.
 
-1.  Install dependencies:
-    ```bash
-    npm install
-    ```
-2.  Start the development server:
-    ```bash
-    npm run dev
-    ```
-3.  Open [http://localhost:5173](http://localhost:5173).
+---
 
-## How to Add a New Module
+### **2. Módulos (Plugins)**
+Ubicación: `src/modules/`
 
-1.  **Create the Module Folder**:
-    Create a new folder in `src/modules/` (e.g., `my-new-tool`).
+Cada módulo es una herramienta independiente, aislada y plug-and-play.
 
-2.  **Implement the Tool Component**:
-    Create your main component (e.g., `MyTool.tsx`).
+Módulos actuales:
+- **CFDI Validator** – Validador de facturas XML.
+- **Ingresos Manager** – Registro y control de ingresos.
+- **Bank Reconciler** – Conciliación bancaria; procesa estados de cuenta PDF.
+- **Tax Tracker** – Seguimiento fiscal.
+- **Financial Summary** – Resumen financiero general.
+- **Facturas** – Organización y control de facturación.
 
-3.  **Define Tool Metadata**:
-    Export a `ToolDefinition` object containing the tool's ID, name, description, icon, and component.
+Reglas:
+- Ningún módulo puede importar directamente código de otro.
+- La lógica compartida debe ir en `src/core` o `src/shared`.
 
-    ```typescript
-    export const myToolDefinition: ToolDefinition = {
-      meta: {
-        id: 'my-new-tool',
-        name: 'My New Tool',
-        description: 'Does amazing things.',
-        icon: MyIcon,
-        version: '1.0.0',
-      },
-      component: MyTool,
-    };
-    ```
+---
 
-4.  **Register the Tool**:
-    Import your definition in `src/modules/registry.ts` and add it to the `toolsRegistry` array.
+### **3. Backend**
+Ubicación: `server/index.js`
 
-    ```typescript
-    import { myToolDefinition } from './my-new-tool';
+Backend Express ligero que funciona como:
+- Procesador de PDFs (pdf-parse).
+- Proxy seguro hacia OpenAI API (GPT-4o).
+- API para parsing de estados de cuenta BBVA:
+  - `POST /api/parse-bank-statement`
 
-    export const toolsRegistry: ToolDefinition[] = [
-      // ... other tools
-      myToolDefinition,
-    ];
-    ```
+---
+
+## 🛠️ Tecnologías
+
+- **Frontend:** React 19, Vite, TypeScript
+- **Estilos:** Tailwind CSS v4
+- **Backend:** Node.js + Express
+- **IA:** OpenAI GPT-4o
+- **PDFs:** pdf-parse
+- **Entorno:** Variables en `.env`
+
+---
+
+## 📈 Plan de Mejora
+
+### **A. Robustez y Seguridad**
+- Validación de datos con **zod**.
+- Sistema global de notificaciones (toasts).
+- Manejo estricto de variables de entorno.
+
+### **B. Experiencia de Usuario**
+- Dashboard personalizable.
+- Persistencia:
+  - SQLite / PostgreSQL  
+  - o localStorage / IndexedDB
+- Micro-interacciones mejoradas.
+
+### **C. Backend**
+- Optimizar costo de IA.
+- Mejorar procesamiento local de PDFs.
+- Tipado compartido entre frontend y backend (tRPC o tipos comunes).
+
+### **D. Calidad del Código**
+- Tests unitarios para parsers.
+- Tests de integración para flujos de carga.
+- README por cada módulo.
+
+---
+
+## 🧠 Notas para desarrolladores y agentes IA
+
+- Mantén siempre el aislamiento entre módulos.
+- Para cambios en APIs, actualiza:
+  - Backend
+  - Tipos TypeScript
+  - Componentes consumidores
+- En el módulo Bank Reconciler, el resultado normalizado **debe** devolver:
+  - `operationDate`
+  - `postingDate`
+  - `description`
+  - `amount`
+  - `balance`
+  - `type` (ingreso/egreso)
+
+---
+
+## 📦 Scripts
+
+```bash
+npm run dev       # Frontend y shell
+npm run server    # Backend Express
+npm run build     # Compilar proyecto completo

@@ -5,7 +5,7 @@ import { TaxTrackerTool } from './index';
 export const taxTrackerDefinition: ToolDefinition = {
     meta: {
         id: 'tax-tracker',
-        name: 'Tax Tracker',
+        name: 'Control Fiscal',
         description: 'Register tax payments and view projections based on income.',
         icon: Calculator,
         version: '0.1.0',

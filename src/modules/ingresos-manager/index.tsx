@@ -2,65 +2,58 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { DollarSign, Plus, Trash2, Download, Search } from 'lucide-react';
 import type { ToolDefinition } from '../shared/types';
 import { dataStore } from '../../core/data/dataStore';
-
-// --- Model Definitions ---
-
-export interface Movement {
-    id: string;
-    date: string;      // ISO date (YYYY-MM-DD)
-    concept: string;
-    amount: number;    // positive = income, negative = expense
-}
-
-interface MovementStats {
-    totalIncome: number;
-    totalExpense: number; // positive absolute value
-    netBalance: number;   // income - expense
-}
+import { type EvoTransaction, createEvoTransaction, calculateTotals } from '../../core/domain/evo-transaction';
+import { parseIngresosCsv } from './utils';
 
 // --- Helper Functions ---
 
-async function loadMovementsFromStore(): Promise<Movement[]> {
+async function loadMovementsFromStore(): Promise<EvoTransaction[]> {
     try {
-        const records = await dataStore.listRecords<{ movements: Movement[] }>('ingresos-manager');
-        if (records.length === 0) return [];
+        // 1. Try loading from unified store
+        const unifiedRecords = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+        if (unifiedRecords.length > 0) {
+            unifiedRecords.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            return unifiedRecords[0].payload.transactions || [];
+        }
 
-        // Sort by createdAt descending to get the latest snapshot
-        records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        return records[0].payload.movements || [];
+        // 2. Migration: Try loading from legacy store
+        console.log('No unified data found, checking legacy Ingresos Manager data...');
+        const legacyRecords = await dataStore.listRecords<{ movements: any[] }>('ingresos-manager');
+        if (legacyRecords.length > 0) {
+            legacyRecords.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            const legacyMovements = legacyRecords[0].payload.movements || [];
+
+            // Convert to EvoTransaction
+            const migrated: EvoTransaction[] = legacyMovements.map((m: any) => ({
+                id: m.id || crypto.randomUUID(),
+                date: m.date,
+                concept: m.concept,
+                amount: Math.abs(m.amount),
+                type: m.type || (m.amount >= 0 ? 'ingreso' : 'gasto'),
+                source: 'legacy-migration'
+            }));
+
+            if (migrated.length > 0) {
+                // Save immediately to unified store
+                await saveSnapshot(migrated);
+                console.log(`Migrated ${migrated.length} records to unified store.`);
+                return migrated;
+            }
+        }
+
+        return [];
     } catch (e) {
         console.error('Failed to load movements from dataStore', e);
         return [];
     }
 }
 
-function calculateStats(movements: Movement[]): MovementStats {
-    let totalIncome = 0;
-    let totalExpense = 0;
-
-    for (const m of movements) {
-        if (m.amount > 0) {
-            totalIncome += m.amount;
-        } else {
-            totalExpense += Math.abs(m.amount);
-        }
-    }
-
-    return {
-        totalIncome,
-        totalExpense,
-        netBalance: totalIncome - totalExpense,
-    };
-}
-
-async function saveSnapshot(movements: Movement[]) {
-    const stats = calculateStats(movements);
+async function saveSnapshot(transactions: EvoTransaction[]) {
     try {
-        await dataStore.saveRecord('ingresos-manager', {
-            movements,
-            stats,
-            movementsCount: movements.length,
+        await dataStore.saveRecord('evo-transactions', {
+            transactions,
             updatedAt: new Date().toISOString(),
+            count: transactions.length,
         });
     } catch (e) {
         console.error('Failed to save snapshot to dataStore', e);
@@ -81,7 +74,8 @@ export const IngresosManagerTool: React.FC = () => {
     const [date, setDate] = useState<string>(todayAsIso());
     const [concept, setConcept] = useState('');
     const [amountStr, setAmountStr] = useState<string>('');
-    const [movements, setMovements] = useState<Movement[]>([]);
+    const [type, setType] = useState<EvoTransaction['type']>('gasto');
+    const [movements, setMovements] = useState<EvoTransaction[]>([]);
     const [isLoaded, setIsLoaded] = useState(false);
     const [filterText, setFilterText] = useState('');
 
@@ -94,7 +88,7 @@ export const IngresosManagerTool: React.FC = () => {
     }, []);
 
     // Derived state for stats
-    const stats = useMemo(() => calculateStats(movements), [movements]);
+    const stats = useMemo(() => calculateTotals(movements), [movements]);
 
     // Persist whenever movements change (only after initial load)
     useEffect(() => {
@@ -108,24 +102,32 @@ export const IngresosManagerTool: React.FC = () => {
         if (!concept.trim() || !amountStr) return;
 
         const parsedAmount = parseFloat(amountStr);
-        if (isNaN(parsedAmount)) return;
+        if (isNaN(parsedAmount) || parsedAmount <= 0) {
+            alert('Please enter a valid positive amount.');
+            return;
+        }
 
-        const newMovement: Movement = {
-            id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
-            date,
-            concept: concept.trim(),
-            amount: parsedAmount,
-        };
+        try {
+            const newMovement = createEvoTransaction({
+                date,
+                concept: concept.trim(),
+                amount: parsedAmount,
+                type: type,
+                source: 'manual'
+            });
 
-        setMovements((prev) => [newMovement, ...prev]);
+            setMovements((prev) => [newMovement, ...prev]);
 
-        // Reset form but keep date
-        setConcept('');
-        setAmountStr('');
+            // Reset form but keep date and type
+            setConcept('');
+            setAmountStr('');
 
-        // Focus back on concept input for rapid entry
-        const conceptInput = document.getElementById('concept-input');
-        conceptInput?.focus();
+            // Focus back on concept input for rapid entry
+            const conceptInput = document.getElementById('concept-input');
+            conceptInput?.focus();
+        } catch (e) {
+            console.error(e);
+        }
     };
 
     const handleDelete = (id: string) => {
@@ -133,17 +135,26 @@ export const IngresosManagerTool: React.FC = () => {
     };
 
     const handleExportCsv = () => {
-        if (movements.length === 0) return;
+        const header = 'Fecha,Concepto,Ingreso,Gasto';
+        let csvContent = header;
 
-        const header = 'Fecha,Concepto,Monto,Tipo';
-        const rows = movements.map((m) => {
-            const type = m.amount >= 0 ? 'Ingreso' : 'Gasto';
-            // Escape quotes in concept
-            const safeConcept = `"${m.concept.replace(/"/g, '""')}"`;
-            return `${m.date},${safeConcept},${m.amount},${type}`;
-        });
+        if (movements.length > 0) {
+            const rows = movements.map((m) => {
+                const safeConcept = `"${m.concept.replace(/"/g, '""')}"`;
+                let ingreso = '';
+                let gasto = '';
 
-        const csvContent = [header, ...rows].join('\n');
+                if (m.type === 'ingreso') {
+                    ingreso = m.amount.toString();
+                } else {
+                    gasto = m.amount.toString();
+                }
+
+                return `${m.date},${safeConcept},${ingreso},${gasto}`;
+            });
+            csvContent += '\n' + rows.join('\n');
+        }
+
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
 
@@ -158,6 +169,33 @@ export const IngresosManagerTool: React.FC = () => {
     const filteredMovements = movements.filter((m) =>
         m.concept.toLowerCase().includes(filterText.toLowerCase())
     );
+
+    const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const text = event.target?.result as string;
+            if (!text) return;
+
+            try {
+                const newMovements = parseIngresosCsv(text);
+                if (newMovements.length === 0) {
+                    alert('No se encontraron movimientos válidos en el CSV.');
+                    return;
+                }
+                setMovements(prev => [...prev, ...newMovements]);
+                alert(`Se importaron ${newMovements.length} movimientos exitosamente.`);
+            } catch (e: any) {
+                alert(e.message || 'Error al importar CSV');
+            }
+
+            // Reset file input
+            e.target.value = '';
+        };
+        reader.readAsText(file);
+    };
 
     return (
         <div className="space-y-6">
@@ -185,7 +223,7 @@ export const IngresosManagerTool: React.FC = () => {
 
             {/* Input Form */}
             <form onSubmit={handleAdd} className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col md:flex-row gap-4 items-end">
-                <div className="w-full md:w-40">
+                <div className="w-full md:w-32">
                     <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Date</label>
                     <input
                         type="date"
@@ -207,15 +245,29 @@ export const IngresosManagerTool: React.FC = () => {
                         required
                     />
                 </div>
-                <div className="w-full md:w-40">
+                <div className="w-full md:w-32">
+                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Type</label>
+                    <select
+                        value={type}
+                        onChange={(e) => setType(e.target.value as 'ingreso' | 'gasto')}
+                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
+                    >
+                        <option value="gasto">Gasto</option>
+                        <option value="ingreso">Ingreso</option>
+                        <option value="pago">Pago</option>
+                        <option value="impuesto">Impuesto</option>
+                    </select>
+                </div>
+                <div className="w-full md:w-32">
                     <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Amount</label>
                     <input
                         type="number"
                         step="0.01"
+                        min="0.01"
                         value={amountStr}
                         onChange={(e) => setAmountStr(e.target.value)}
                         className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
-                        placeholder="-100 or 500"
+                        placeholder="0.00"
                         required
                     />
                 </div>
@@ -241,13 +293,27 @@ export const IngresosManagerTool: React.FC = () => {
                         placeholder="Filtrar por concepto..."
                     />
                 </div>
-                <button
-                    onClick={handleExportCsv}
-                    disabled={movements.length === 0}
-                    className="w-full md:w-auto px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 text-sm"
-                >
-                    <Download size={14} /> Exportar CSV
-                </button>
+                <div className="flex gap-2 w-full md:w-auto">
+                    <input
+                        type="file"
+                        accept=".csv"
+                        id="csv-upload-input"
+                        style={{ display: 'none' }}
+                        onChange={handleImportCsv}
+                    />
+                    <button
+                        onClick={() => document.getElementById('csv-upload-input')?.click()}
+                        className="w-full md:w-auto px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center justify-center gap-2 text-sm"
+                    >
+                        <Download size={14} className="rotate-180" /> Importar CSV
+                    </button>
+                    <button
+                        onClick={handleExportCsv}
+                        className="w-full md:w-auto px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 text-sm"
+                    >
+                        <Download size={14} /> Exportar CSV
+                    </button>
+                </div>
             </div>
 
             {/* Table */}
@@ -275,15 +341,15 @@ export const IngresosManagerTool: React.FC = () => {
                                     <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{m.date}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{m.concept}</td>
-                                        <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium ${m.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                                        <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-mono font-medium ${m.type === 'ingreso' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                                             {formatCurrency(m.amount)}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
-                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${m.amount >= 0
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${m.type === 'ingreso'
                                                 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
                                                 : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
                                                 }`}>
-                                                {m.amount >= 0 ? 'Ingreso' : 'Gasto'}
+                                                {m.type === 'ingreso' ? 'Ingreso' : 'Gasto'}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -309,7 +375,7 @@ export const IngresosManagerTool: React.FC = () => {
 export const ingresosManagerDefinition: ToolDefinition = {
     meta: {
         id: 'ingresos-manager',
-        name: 'Ingresos Manager',
+        name: 'Gestor de Ingresos',
         description: 'Track and manage your income sources.',
         icon: DollarSign,
         version: '0.5.0',

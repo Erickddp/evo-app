@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { PieChart, ArrowUpCircle, ArrowDownCircle, DollarSign, TrendingUp, Activity, Calendar, Filter } from 'lucide-react';
 import { dataStore } from '../../core/data/dataStore';
-import type { Movement as IngresosMovement } from '../ingresos-manager/index';
-import type { TaxPayment } from '../tax-tracker/types';
+import { type EvoTransaction } from '../../core/domain/evo-transaction';
 import {
     normalizeMovements,
     calculateFinancialSummary,
@@ -102,20 +101,16 @@ export const FinancialSummary: React.FC = () => {
         const loadData = async () => {
             setLoading(true);
             try {
-                // 1. Load Ingresos Manager
-                const ingresosRecords = await dataStore.listRecords<{ movements: IngresosMovement[] }>('ingresos-manager');
-                let ingresosMovements: IngresosMovement[] = [];
-                if (ingresosRecords.length > 0) {
-                    ingresosRecords.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                    ingresosMovements = ingresosRecords[0].payload.movements || [];
+                // Load Unified Transactions
+                const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                let transactions: EvoTransaction[] = [];
+                if (records.length > 0) {
+                    records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                    transactions = records[0].payload.transactions || [];
                 }
 
-                // 2. Load Tax Tracker
-                const taxRecords = await dataStore.listRecords<TaxPayment>('tax-tracker');
-                const taxPayments = taxRecords.map(r => r.payload);
-
                 // Normalize
-                const normalized = normalizeMovements(ingresosMovements, taxPayments);
+                const normalized = normalizeMovements(transactions);
                 setAllMovements(normalized);
 
             } catch (e) {
@@ -145,7 +140,7 @@ export const FinancialSummary: React.FC = () => {
                         <PieChart className="text-indigo-600" /> Estado de resultados
                     </h2>
                     <p className="text-gray-500 dark:text-gray-400 mt-1">
-                        Estado de resultados automático generado con los movimientos registrados en EVORIX Core.
+                        Estado de resultados automático generado con los movimientos registrados en EVOAPP.
                     </p>
                 </div>
 
