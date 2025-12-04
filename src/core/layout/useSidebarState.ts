@@ -4,11 +4,8 @@ const STORAGE_KEY = 'evorix.sidebarState';
 const MOBILE_BREAKPOINT = 768;
 
 export function useSidebarState() {
-    // Initialize from localStorage or default to false (expanded)
-    const [isCollapsed, setIsCollapsed] = useState(() => {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        return stored ? JSON.parse(stored) : false;
-    });
+    // Initialize to collapsed (true) by default, ignoring localStorage for initial state
+    const [isCollapsed, setIsCollapsed] = useState(true);
 
     const [isMobile, setIsMobile] = useState(window.innerWidth < MOBILE_BREAKPOINT);
     const [isMobileOpen, setIsMobileOpen] = useState(false);

@@ -6,87 +6,84 @@ export function Settings() {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleClearData = async () => {
-        if (window.confirm('Are you sure you want to clear all local data? This action cannot be undone.')) {
+        if (window.confirm('¿Estás seguro de que deseas borrar todos los datos locales? Esta acción no se puede deshacer.')) {
             try {
                 await dataStore.clearAll();
                 localStorage.clear();
                 window.location.reload();
             } catch (error) {
                 console.error('Failed to clear data:', error);
-                alert('Failed to clear some data. Please try again.');
+                alert('Error al borrar algunos datos. Por favor, inténtalo de nuevo.');
             }
         }
     };
 
     return (
-        <div className="max-w-3xl space-y-8">
-            <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
-                <p className="mt-2 text-gray-600 dark:text-gray-400">
-                    Manage your application preferences and data storage.
-                </p>
-            </div>
+        <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+            <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+                {/* Header */}
+                <div className="flex flex-col gap-1 mb-4">
+                    <h1 className="text-2xl font-semibold tracking-tight text-slate-50">Ajustes</h1>
+                    <p className="text-sm text-slate-400">Administra la apariencia, datos y copias de seguridad.</p>
+                </div>
 
-            <div className="space-y-6">
                 {/* General Section */}
-                <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400">
-                            <Shield className="h-5 w-5" />
-                        </div>
-                        <h2 className="text-lg font-medium text-gray-900 dark:text-white">General</h2>
+                <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-black/40 p-5 flex flex-col gap-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/50">
+                    <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+                        <Shield className="h-5 w-5" />
+                        <h2>General</h2>
                     </div>
 
                     <div className="space-y-4">
                         <div>
-                            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Appearance</h3>
-                            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                                Theme preferences are currently managed via the toggle in the top navigation bar.
+                            <h3 className="text-sm font-medium text-slate-200">Apariencia</h3>
+                            <p className="mt-1 text-xs text-slate-400">
+                                El tema se controla desde el interruptor en la barra superior.
                             </p>
                         </div>
                     </div>
                 </section>
 
                 {/* Data Management Section */}
-                <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 rounded-lg bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400">
-                            <Database className="h-5 w-5" />
-                        </div>
-                        <h2 className="text-lg font-medium text-gray-900 dark:text-white">Data Management</h2>
+                <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-black/40 p-5 flex flex-col gap-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/50">
+                    <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+                        <Database className="h-5 w-5" />
+                        <h2>Gestión de datos</h2>
                     </div>
 
                     <div className="space-y-6">
-                        <div className="rounded-lg bg-gray-50 p-4 dark:bg-gray-900/50">
+                        <div className="rounded-lg bg-slate-950/50 p-4 border border-slate-800/50">
                             <div className="flex gap-3">
-                                <Info className="h-5 w-5 text-gray-400 shrink-0 mt-0.5" />
-                                <div className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                                <Info className="h-5 w-5 text-slate-500 shrink-0 mt-0.5" />
+                                <div className="space-y-2 text-xs text-slate-400">
                                     <p>
-                                        <span className="font-medium text-gray-900 dark:text-white">DataStore backend:</span> LocalStorage (CSV-ready)
+                                        <span className="font-medium text-slate-200">Motor de datos:</span> LocalStorage (compatible con CSV)
                                     </p>
                                     <p>
-                                        <span className="font-medium text-gray-900 dark:text-white">Note:</span> Due to browser sandboxing, the app cannot write arbitrary CSV directly to your disk. Use the copy button below to export data.
+                                        <span className="font-medium text-slate-200">Nota:</span> Debido al aislamiento del navegador, la aplicación no puede escribir CSV directamente en tu disco. Usa el botón de copiar para exportar datos.
                                     </p>
                                 </div>
                             </div>
 
                             <div className="mt-4 flex flex-wrap gap-3">
+                                {/* Copy CSV Button */}
                                 <button
                                     onClick={async () => {
                                         try {
                                             const csv = await dataStore.exportAllAsCsv();
                                             await navigator.clipboard.writeText(csv);
-                                            alert('CSV copied to clipboard!');
+                                            alert('¡CSV copiado al portapapeles!');
                                         } catch (err) {
                                             console.error('Failed to copy CSV', err);
-                                            alert('Failed to copy CSV');
+                                            alert('Error al copiar CSV');
                                         }
                                     }}
-                                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors dark:text-blue-400 dark:bg-blue-900/20 dark:hover:bg-blue-900/30"
+                                    className="inline-flex items-center justify-center px-3 py-2 rounded-lg border border-slate-600 bg-slate-900/70 hover:bg-slate-800 text-xs font-semibold text-slate-200 transition-colors duration-150"
                                 >
-                                    Copy CSV preview to clipboard
+                                    Copiar vista previa CSV
                                 </button>
 
+                                {/* Download CSV Button */}
                                 <button
                                     onClick={async () => {
                                         try {
@@ -103,15 +100,16 @@ export function Settings() {
                                             URL.revokeObjectURL(url);
                                         } catch (err) {
                                             console.error('Failed to download CSV', err);
-                                            alert('Failed to download CSV backup');
+                                            alert('Error al descargar la copia CSV');
                                         }
                                     }}
-                                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-green-600 bg-green-50 hover:bg-green-100 rounded-md transition-colors dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30"
+                                    className="inline-flex items-center justify-center px-3 py-2 rounded-lg bg-emerald-500/90 hover:bg-emerald-400 text-slate-900 text-xs font-semibold shadow-md shadow-emerald-900/50 transition-colors duration-150"
                                 >
-                                    <Upload className="h-4 w-4 rotate-180" />
-                                    Download CSV backup
+                                    <Upload className="h-4 w-4 rotate-180 mr-2" />
+                                    Descargar copia CSV
                                 </button>
 
+                                {/* Restore Input & Button */}
                                 <input
                                     type="file"
                                     accept=".csv"
@@ -126,21 +124,20 @@ export function Settings() {
                                             const result = await dataStore.importFromCsv(text, { clearBefore: true });
 
                                             if (result.importedCount === 0) {
-                                                let msg = 'No records could be restored from this CSV.';
+                                                let msg = 'No se pudieron restaurar registros de este CSV.';
                                                 if (result.errors.length > 0) {
-                                                    msg += '\n\nErrors encountered:\n' + result.errors.slice(0, 5).join('\n');
-                                                    if (result.errors.length > 5) msg += `\n...and ${result.errors.length - 5} more.`;
+                                                    msg += '\n\nErrores encontrados:\n' + result.errors.slice(0, 5).join('\n');
+                                                    if (result.errors.length > 5) msg += `\n...y ${result.errors.length - 5} más.`;
                                                 } else {
-                                                    msg += '\n\nPlease check the header row and that the CSV was not re-formatted.';
+                                                    msg += '\n\nPor favor verifica la fila de encabezado y que el CSV no haya sido reformateado.';
                                                 }
                                                 alert(msg);
                                             } else {
-                                                let msg = `Successfully restored ${result.importedCount} records from CSV.`;
+                                                let msg = `Se restauraron exitosamente ${result.importedCount} registros desde CSV.`;
                                                 if (result.errorCount > 0) {
-                                                    msg += `\n(${result.errorCount} rows skipped due to errors)`;
+                                                    msg += `\n(${result.errorCount} filas omitidas debido a errores)`;
                                                 }
                                                 alert(msg);
-                                                // Reload to show new data
                                                 window.location.reload();
                                             }
 
@@ -149,9 +146,8 @@ export function Settings() {
                                             }
                                         } catch (err) {
                                             console.error('Failed to import CSV', err);
-                                            alert('Error restoring data from CSV. Check console for details.');
+                                            alert('Error al restaurar datos desde CSV. Revisa la consola para más detalles.');
                                         } finally {
-                                            // Reset input so same file can be selected again
                                             if (fileInputRef.current) {
                                                 fileInputRef.current.value = '';
                                             }
@@ -160,37 +156,37 @@ export function Settings() {
                                 />
                                 <button
                                     onClick={() => fileInputRef.current?.click()}
-                                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md transition-colors dark:text-gray-300 dark:bg-gray-800 dark:border-gray-600 dark:hover:bg-gray-700"
+                                    className="inline-flex items-center justify-center px-3 py-2 rounded-lg border border-slate-600 bg-slate-900/70 hover:bg-slate-800 text-xs font-semibold text-slate-200 transition-colors duration-150"
                                 >
-                                    <Upload className="h-4 w-4" />
-                                    Restore data from CSV
+                                    <Upload className="h-4 w-4 mr-2" />
+                                    Restaurar datos desde CSV
                                 </button>
                             </div>
-                            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                                Use this to restore your data from a CSV backup previously exported from this app.
+                            <p className="mt-2 text-xs text-slate-500">
+                                Usa esto para restaurar tus datos desde una copia de seguridad CSV exportada previamente desde esta aplicación.
                                 <br />
-                                The CSV must have columns: id, toolId, createdAt, updatedAt, payload_json.
+                                El CSV debe tener las columnas: id, toolId, createdAt, updatedAt, payload_json.
                             </p>
                         </div>
 
-                        <div className="pt-4 border-t border-gray-100 dark:border-gray-700">
-                            <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Danger Zone</h3>
+                        <div className="pt-4 border-t border-slate-800">
+                            <h3 className="text-sm font-medium text-slate-200 mb-2">Zona de peligro</h3>
                             <div className="flex items-center justify-between">
-                                <p className="text-sm text-gray-500 dark:text-gray-400">
-                                    Permanently remove all local data from this browser.
+                                <p className="text-xs text-slate-400">
+                                    Eliminar permanentemente todos los datos locales de este navegador.
                                 </p>
                                 <button
                                     onClick={handleClearData}
-                                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors dark:text-red-400 dark:hover:bg-red-900/20"
+                                    className="inline-flex items-center justify-center px-3 py-2 rounded-lg bg-rose-600/80 hover:bg-rose-500 text-slate-50 text-xs font-semibold shadow-md shadow-rose-900/50 transition-colors duration-150"
                                 >
-                                    <Trash2 className="h-4 w-4" />
-                                    Clear Local Data
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Borrar datos locales
                                 </button>
                             </div>
                         </div>
                     </div>
                 </section>
-            </div >
-        </div >
+            </div>
+        </div>
     );
 }

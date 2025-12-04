@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { toolsRegistry } from '../modules/registry';
 import { ErrorBoundary } from '../core/errors/ErrorBoundary';
-import { ToolsSidebar } from './ToolsSidebar';
+import { ToolsSidebar } from '../components/ToolsSidebar';
 
 export function ToolsHub() {
   const [selectedToolId, setSelectedToolId] = useState<string | null>(() => {
@@ -31,7 +31,7 @@ export function ToolsHub() {
       <ToolsSidebar
         tools={toolsRegistry}
         selectedToolId={selectedToolId}
-        onSelectTool={handleSelectTool}
+        onSelect={handleSelectTool}
         collapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
       />

@@ -3,7 +3,11 @@ import { Save, User, Building2, FileText, CheckCircle, AlertCircle } from 'lucid
 import type { TaxProfile } from '../../shared/taxProfile';
 import { taxProfileStore } from '../store/taxProfileStore';
 
-export const TaxProfileForm: React.FC<{ onProfileSaved?: () => void }> = ({ onProfileSaved }) => {
+export const TaxProfileForm: React.FC<{
+    onProfileSaved?: () => void;
+    onCancel?: () => void;
+    showCancel?: boolean;
+}> = ({ onProfileSaved, onCancel, showCancel }) => {
     const [profile, setProfile] = useState<TaxProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
@@ -46,9 +50,18 @@ export const TaxProfileForm: React.FC<{ onProfileSaved?: () => void }> = ({ onPr
             setMessage({ type: 'error', text: 'El RFC es obligatorio.' });
             return;
         }
-        if (!nombre.trim() && !razonSocial.trim()) {
-            setMessage({ type: 'error', text: 'Debes ingresar Nombre o Razón Social.' });
-            return;
+
+        // Validation for RESICO PF
+        if (tipoPersona === 'PF' && regimenFiscal === 'PF_RESICO') {
+            if (!nombre.trim()) {
+                setMessage({ type: 'error', text: 'El Nombre Completo es obligatorio para RESICO PF.' });
+                return;
+            }
+        } else {
+            if (!nombre.trim() && !razonSocial.trim()) {
+                setMessage({ type: 'error', text: 'Debes ingresar Nombre o Razón Social.' });
+                return;
+            }
         }
 
         const newProfile: TaxProfile = {
@@ -65,7 +78,7 @@ export const TaxProfileForm: React.FC<{ onProfileSaved?: () => void }> = ({ onPr
         try {
             await taxProfileStore.saveTaxProfile(newProfile);
             setProfile(newProfile);
-            setMessage({ type: 'success', text: 'Perfil fiscal guardado correctamente.' });
+            setMessage({ type: 'success', text: 'Perfil confirmado y guardado.' });
 
             // Clear success message after 3 seconds
             setTimeout(() => setMessage(null), 3000);
@@ -77,32 +90,23 @@ export const TaxProfileForm: React.FC<{ onProfileSaved?: () => void }> = ({ onPr
         }
     };
 
-    const getRegimenLabel = (regimen: string) => {
-        switch (regimen) {
-            case 'PF_RESICO': return 'Persona Física - RESICO';
-            case 'PF_ACT_EMPRESARIAL': return 'Persona Física - Actividad Empresarial';
-            case 'PM_RESICO': return 'Persona Moral - RESICO';
-            case 'PM_GENERAL': return 'Persona Moral - Régimen General';
-            default: return regimen;
-        }
-    };
-
     if (loading) return <div className="text-sm text-gray-500">Cargando perfil...</div>;
 
+    // Expanded View (Form)
     return (
         <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
             <div className="flex justify-between items-start mb-4">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                     <FileText className="text-indigo-600" size={20} />
-                    Perfil Fiscal
+                    Configurar Perfil Fiscal
                 </h3>
-                {profile && (
-                    <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded-full text-xs font-medium border border-indigo-100 dark:border-indigo-800">
-                        <User size={12} />
-                        <span>{getRegimenLabel(profile.regimenFiscal)}</span>
-                        <span className="mx-1">•</span>
-                        <span>{profile.rfc}</span>
-                    </div>
+                {showCancel && (
+                    <button
+                        onClick={onCancel}
+                        className="text-xs text-gray-500 hover:text-gray-700"
+                    >
+                        Cancelar
+                    </button>
                 )}
             </div>
 
@@ -191,7 +195,9 @@ export const TaxProfileForm: React.FC<{ onProfileSaved?: () => void }> = ({ onPr
                     className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
                 >
                     <Save size={16} />
-                    Guardar Perfil
+                    {tipoPersona === 'PF' && regimenFiscal === 'PF_RESICO'
+                        ? 'Confirmar perfil y calcular'
+                        : 'Guardar Perfil'}
                 </button>
             </div>
         </div>

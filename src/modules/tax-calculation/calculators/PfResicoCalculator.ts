@@ -2,6 +2,7 @@ import type { RegimenCalculator, BaseParams, TaxParams, BaseResult, TaxResult } 
 
 export class PfResicoCalculator implements RegimenCalculator {
     calculateBase(params: BaseParams): BaseResult {
+        // Cálculo RESICO Persona Física
         // RESICO ISR Base = Gross Income
         // IVA Base = Income - Expenses (Cash flow)
         return {

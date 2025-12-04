@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calculator, DollarSign, Calendar, TrendingUp, TrendingDown, AlertCircle, Save, CheckCircle } from 'lucide-react';
+import { Calculator, DollarSign, Calendar, TrendingUp, TrendingDown, AlertCircle, Save, CheckCircle, User, Edit2 } from 'lucide-react';
 import { dataStore } from '../../core/data/dataStore';
 import { evoStore } from '../../core/evoappDataStore';
 import { ingresosMapper } from '../../core/mappers/ingresosMapper';
@@ -76,12 +76,17 @@ export const TaxCalculationModule: React.FC = () => {
     }, []);
 
     const [profile, setProfile] = useState<any>(null);
+    const [profileCollapsed, setProfileCollapsed] = useState(false);
 
     // Load profile to know which calculator to use
     useEffect(() => {
         const loadProfile = async () => {
             const p = await import('./store/taxProfileStore').then(m => m.taxProfileStore.getTaxProfile());
             setProfile(p);
+            // Si ya existe un perfil, colapsar automáticamente
+            if (p) {
+                setProfileCollapsed(true);
+            }
         };
         loadProfile();
     }, [loading]);
@@ -92,6 +97,8 @@ export const TaxCalculationModule: React.FC = () => {
         const load = async () => {
             const p = await import('./store/taxProfileStore').then(m => m.taxProfileStore.getTaxProfile());
             setProfile(p);
+            // Nota: Aquí no forzamos el colapso para permitir que el usuario vea cambios si acaba de editar,
+            // pero el callback onProfileSaved ya se encargará de colapsarlo.
         };
         load();
     }, [refreshTrigger]);
@@ -115,6 +122,7 @@ export const TaxCalculationModule: React.FC = () => {
         });
 
         // Use Calculator Strategy
+        // RESICO (Persona Física) logic is handled here by selecting the appropriate calculator
         const calculator = getCalculatorForRegimen(profile?.regimenFiscal);
 
         const baseResult = calculator.calculateBase({ income, expenses });
@@ -165,6 +173,16 @@ export const TaxCalculationModule: React.FC = () => {
 
     const formatCurrency = (val: number) => val.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
+    const getRegimenLabel = (regimen: string) => {
+        switch (regimen) {
+            case 'PF_RESICO': return 'Persona Física - RESICO';
+            case 'PF_ACT_EMPRESARIAL': return 'Persona Física - Actividad Empresarial';
+            case 'PM_RESICO': return 'Persona Moral - RESICO';
+            case 'PM_GENERAL': return 'Persona Moral - Régimen General';
+            default: return regimen;
+        }
+    };
+
     if (loading) return <div className="p-8 text-center text-gray-500">Cargando datos fiscales...</div>;
 
     return (
@@ -189,7 +207,47 @@ export const TaxCalculationModule: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="md:col-span-3">
-                    <TaxProfileForm onProfileSaved={() => setRefreshTrigger(prev => prev + 1)} />
+                    {profileCollapsed && profile ? (
+                        // Vista colapsada (Resumen)
+                        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 rounded-full text-indigo-600 dark:text-indigo-400">
+                                    <User size={24} />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                        Perfil fiscal confirmado
+                                    </h3>
+                                    <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                                        <span>{profile.tipoPersona === 'PF' ? 'Persona Física' : 'Persona Moral'}</span>
+                                        <span>•</span>
+                                        <span className="font-medium text-indigo-600 dark:text-indigo-400">{getRegimenLabel(profile.regimenFiscal)}</span>
+                                        <span>•</span>
+                                        <span>RFC {profile.rfc}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setProfileCollapsed(false)}
+                                className="flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 font-medium hover:underline"
+                            >
+                                <Edit2 size={16} />
+                                Hacer cambios
+                            </button>
+                        </div>
+                    ) : (
+                        // Vista expandida (Formulario)
+                        <TaxProfileForm
+                            onProfileSaved={() => {
+                                setRefreshTrigger(prev => prev + 1);
+                                setProfileCollapsed(true);
+                            }}
+                            onCancel={() => {
+                                if (profile) setProfileCollapsed(true);
+                            }}
+                            showCancel={!!profile}
+                        />
+                    )}
                 </div>
 
                 {/* Base Calculation */}

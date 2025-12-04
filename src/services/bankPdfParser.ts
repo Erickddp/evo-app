@@ -3,10 +3,10 @@ import { bankMovementsToCsv } from '../utils/bankCsv';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 
-// Configure worker
-// Using a CDN for the worker to avoid complex build setup with Vite
-// We use the version from the imported library to ensure compatibility
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+// Configure worker for Vite
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 export async function parseBankStatementPdf(file: File): Promise<{
     movements: BankMovement[];
@@ -14,18 +14,20 @@ export async function parseBankStatementPdf(file: File): Promise<{
 }> {
     try {
         const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-        const pdf = await loadingTask.promise;
 
+        const loadingTask = pdfjsLib.getDocument({
+            data: arrayBuffer,
+            cMapUrl: 'https://unpkg.com/pdfjs-dist@5.4.449/cmaps/',
+            cMapPacked: true,
+        });
+
+        const pdf = await loadingTask.promise;
         let fullTextLines: string[] = [];
 
         // 1. Extract text from all pages
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
-
-            // Sort items by Y position (descending) then X position (ascending)
-            // PDF coordinates: (0,0) is bottom-left usually.
             const items = textContent.items as TextItem[];
 
             // Group items by line (approximate Y)
@@ -33,11 +35,11 @@ export async function parseBankStatementPdf(file: File): Promise<{
 
             items.forEach((item) => {
                 // Round Y to group items on the same line (tolerance of 2-3 units)
-                // transform[5] is the translate-y component
                 const y = Math.round(item.transform[5]);
                 const existingLine = lines.find(l => Math.abs(l.y - y) < 5);
 
                 if (existingLine) {
+                    // Add space if needed
                     existingLine.text += ' ' + item.str;
                 } else {
                     lines.push({ y, text: item.str });
@@ -50,13 +52,15 @@ export async function parseBankStatementPdf(file: File): Promise<{
             fullTextLines.push(...lines.map(l => l.text.trim()));
         }
 
-        // 2. Parse BBVA format
+        // Debug log as requested
+        const fullText = fullTextLines.join('\n');
+        console.log("Contenido extraído del PDF (primeros caracteres):", fullText.slice(0, 200));
+
+        // 2. Parse BBVA format (or generic fallback)
         const movements = parseBbvaLines(fullTextLines);
 
         if (movements.length === 0) {
             console.warn('No movements found. Dumping first 20 lines for debug:', fullTextLines.slice(0, 20));
-            // Don't throw immediately if we have lines but no movements, maybe it's just empty?
-            // But usually a statement has movements.
             if (fullTextLines.length > 0) {
                 throw new Error('No se detectaron movimientos válidos. Asegúrate de que sea un estado de cuenta BBVA legible.');
             } else {
@@ -80,25 +84,32 @@ function parseBbvaLines(lines: string[]): BankMovement[] {
     let isReadingMovements = false;
 
     // Regex to match a date at start of line: DD/MM or DD/MM/YYYY
-    const dateRegex = /^(\d{2}\/\d{2}(\/\d{2,4})?)/;
+    const dateRegex = /^(\d{1,2}\/\d{1,2}(\/\d{2,4})?)/;
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
+        const upperLine = line.toUpperCase();
 
-        // Start reading after "Detalle de Movimientos" or similar header
+        // Start reading logic - relaxed
         if (!isReadingMovements) {
-            if (line.toUpperCase().includes('DETALLE DE MOVIMIENTOS') ||
-                line.toUpperCase().includes('MOVIMIENTOS DEL PERIODO')) {
+            // If we see a date at the start of the line AND it looks like a movement line (has numbers at end), start reading
+            const match = line.match(dateRegex);
+            if (match && (upperLine.includes('DETALLE') || upperLine.includes('MOVIMIENTOS') || parseBbvaLine(line))) {
+                isReadingMovements = true;
+                // Don't continue, process this line too if it's a movement
+            } else if (upperLine.includes('DETALLE DE MOVIMIENTOS') || upperLine.includes('MOVIMIENTOS DEL PERIODO')) {
                 isReadingMovements = true;
                 continue;
             }
         }
 
         if (isReadingMovements) {
-            // Stop if we hit end of section
-            if (line.toUpperCase().includes('TOTAL DE MOVIMIENTOS') ||
-                line.toUpperCase().includes('SALDO FINAL')) {
-                break;
+            // Stop conditions
+            if (upperLine.includes('TOTAL DE MOVIMIENTOS') ||
+                upperLine.includes('SALDO FINAL') ||
+                (upperLine.includes('TOTAL') && upperLine.includes('CARGOS'))) {
+                // If we have movements, assume we are done.
+                if (movements.length > 0) break;
             }
 
             // Attempt to parse line
@@ -117,96 +128,88 @@ function parseBbvaLines(lines: string[]): BankMovement[] {
 
 function parseBbvaLine(line: string): BankMovement | null {
     try {
-        // 1. Extract Dates
-        // Expecting: DateOp DateVal ...
+        // BBVA Line Format usually:
+        // DIA/MES  DIA/MES  DESCRIPCION...  CARGO  ABONO  SALDO
+        // Sometimes:
+        // DIA/MES  DESCRIPCION... CANTIDAD SALDO
+
         const parts = line.split(/\s+/);
-        if (parts.length < 4) return null;
+        if (parts.length < 3) return null;
 
-        const date1 = parts[0]; // Oper
-        const date2 = parts[1]; // Posting (sometimes same)
+        // 1. Extract Dates
+        const date1 = parts[0];
+        // Sometimes the second part is also a date (Posting Date)
+        let date2 = date1;
+        let descStartIndex = 1;
 
-        // Validate dates
+        if (isValidDate(parts[1])) {
+            date2 = parts[1];
+            descStartIndex = 2;
+        }
+
         if (!isValidDate(date1)) return null;
 
-        // 2. Extract Amounts from end
-        // We expect the last items to be numbers.
-        // BBVA: ... Description ... Charge? Payment? Balance
-
+        // 2. Parse numbers from the end
         const parseAmount = (str: string) => {
             if (!str) return NaN;
             return parseFloat(str.replace(/,/g, ''));
         };
 
-        const lastPart = parts[parts.length - 1];
-        const secondLastPart = parts[parts.length - 2];
-
-        const balance = parseAmount(lastPart);
-        const amountOrEmpty = parseAmount(secondLastPart);
-
-        if (isNaN(balance)) {
-            return null;
-        }
-
+        let balance = NaN;
         let amount = 0;
-        let type: 'ingreso' | 'egreso' = 'egreso';
-        let descriptionEndIndex = parts.length - 1;
+        let type: 'ingreso' | 'egreso' = 'egreso'; // default
+        let descEndIndex = parts.length - 1;
 
-        if (!isNaN(amountOrEmpty)) {
-            // We have a balance and a preceding number.
+        // Try to identify the numbers at the end
+        const lastVal = parseAmount(parts[parts.length - 1]);
+        const secondLastVal = parseAmount(parts[parts.length - 2]);
+        const thirdLastVal = parseAmount(parts[parts.length - 3]);
 
-            // Check for 3 numbers at end (Charge, Payment, Balance)
-            const thirdLastPart = parts[parts.length - 3];
-            const val3 = parseAmount(thirdLastPart);
+        if (!isNaN(lastVal)) {
+            balance = lastVal;
+            descEndIndex = parts.length - 1;
 
-            if (!isNaN(val3)) {
-                // 3 numbers found: Charge, Payment, Balance
-                // If Charge is non-zero, it's Expense.
-                // If Payment is non-zero, it's Income.
-                // But usually one is 0 or empty?
-                // In text extraction, empty columns might be skipped.
-                // So if we see 3 numbers, it means both Charge and Payment columns had text?
-                // Or maybe the Description ended with a number?
+            if (!isNaN(secondLastVal)) {
+                // We have at least one amount column
+                descEndIndex = parts.length - 2;
 
-                // Let's assume:
-                // If 3 numbers: Charge, Payment, Balance.
-                // If Charge > 0 -> Egreso
-                // If Payment > 0 -> Ingreso
+                if (!isNaN(thirdLastVal)) {
+                    // We have two amount columns: Charge, Payment, Balance
+                    const cargo = thirdLastVal;
+                    const abono = secondLastVal;
+                    descEndIndex = parts.length - 3;
 
-                // But wait, parseAmount might return a number from description.
-                // Let's rely on keywords for now as a safer fallback if we can't distinguish.
+                    if (abono !== 0 && !isNaN(abono)) {
+                        amount = abono;
+                        type = 'ingreso';
+                    } else {
+                        amount = cargo;
+                        type = 'egreso';
+                    }
+                } else {
+                    // Only one amount column before balance.
+                    amount = secondLastVal;
 
-                // Actually, let's look at the "Amount" (secondLastPart).
-                // If we only have 2 numbers (Amount, Balance), we need to guess type.
-
-                amount = amountOrEmpty;
-                descriptionEndIndex = parts.length - 2;
-
-                // Heuristic: Keywords in description
-                const desc = parts.slice(2, parts.length - 2).join(' ');
-                const incomeKeywords = ['ABONO', 'DEPOSITO', 'NOMINA', 'TRASPASO A FAVOR', 'RECEPCION', 'PAGO DE INTERESES', 'VENTA'];
-                if (incomeKeywords.some(k => desc.toUpperCase().includes(k))) {
-                    type = 'ingreso';
+                    // Heuristic for type based on description keywords
+                    const tempDesc = parts.slice(descStartIndex, descEndIndex).join(' ').toUpperCase();
+                    const incomeKeywords = ['ABONO', 'DEPOSITO', 'NOMINA', 'TRASPASO A FAVOR', 'RECEPCION', 'PAGO DE INTERESES', 'VENTA', 'T.A.F'];
+                    if (incomeKeywords.some(k => tempDesc.includes(k))) {
+                        type = 'ingreso';
+                    } else {
+                        type = 'egreso';
+                    }
                 }
             } else {
-                // Only 2 numbers found at end (Amount, Balance)
-                amount = amountOrEmpty;
-                descriptionEndIndex = parts.length - 2;
-
-                const desc = parts.slice(2, parts.length - 2).join(' ');
-                const incomeKeywords = ['ABONO', 'DEPOSITO', 'NOMINA', 'TRASPASO A FAVOR', 'RECEPCION', 'PAGO DE INTERESES', 'VENTA'];
-                if (incomeKeywords.some(k => desc.toUpperCase().includes(k))) {
-                    type = 'ingreso';
-                }
+                // Only balance found? That's weird for a movement line.
+                return null;
             }
         } else {
-            // Only balance found?
             return null;
         }
 
-        const description = parts.slice(2, descriptionEndIndex).join(' ');
+        const description = parts.slice(descStartIndex, descEndIndex).join(' ');
 
         return {
-            id: `mov-${Math.random().toString(36).substr(2, 9)}`,
             operationDate: date1,
             postingDate: date2,
             description: description,
@@ -222,5 +225,6 @@ function parseBbvaLine(line: string): BankMovement | null {
 }
 
 function isValidDate(str: string): boolean {
-    return /^\d{2}\/\d{2}(\/\d{2,4})?$/.test(str);
+    // Matches DD/MM or DD/MM/YYYY or DD/MM/YY
+    return /^\d{1,2}\/\d{1,2}(\/\d{2,4})?$/.test(str);
 }

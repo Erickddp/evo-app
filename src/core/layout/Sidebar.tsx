@@ -50,15 +50,20 @@ export function Sidebar({ isCollapsed, isMobile, isOpen, toggleSidebar, closeMob
                 {/* Header */}
                 <div className={`
                     h-16 flex items-center 
-                    ${isCollapsed && !isMobile ? 'justify-center px-0' : 'justify-between px-4'}
+                    justify-between
+                    ${isCollapsed && !isMobile ? 'px-3' : 'px-4'}
                     border-b border-gray-200 dark:border-gray-800
                 `}>
                     {!isCollapsed || isMobile ? (
-                        <h1 className="text-xl font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2 whitespace-nowrap overflow-hidden">
-                            <span className="text-blue-600 dark:text-blue-400">EVORIX</span> Core
+                        <h1 className="text-2xl font-extrabold flex items-center gap-2 whitespace-nowrap overflow-hidden">
+                            <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">
+                                EVOAPP
+                            </span>
                         </h1>
                     ) : (
-                        <span className="text-xl font-bold text-blue-600 dark:text-blue-400">E</span>
+                        <span className="text-2xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400">
+                            E
+                        </span>
                     )}
 
                     {/* Desktop Toggle Button */}
