@@ -3,12 +3,17 @@ import { Upload, FileText, ArrowRight, Save, AlertCircle, CheckCircle, Download 
 import { parseBankStatementPdf } from '../../services/bankPdfParser';
 import type { BankMovement as SharedBankMovement } from '../../types/bank';
 import { dataStore } from '../../core/data/dataStore';
-import { type EvoTransaction, createEvoTransaction } from '../../core/domain/evo-transaction';
+import { evoStore } from '../../core/evoappDataStore';
+import { bankMapper } from '../../core/mappers/bankMapper';
+import { ingresosMapper } from '../../core/mappers/ingresosMapper';
+import { createEvoTransaction } from '../../core/domain/evo-transaction';
 
 // --- Types ---
 
 type MovementType = 'income' | 'expense';
 
+// TODO: Refactor to use 'MovimientoBancario' from src/core/evoappDataModel.ts in Phase 2
+// (We are now using bankMapper to convert this to MovimientoBancario)
 interface BankMovement {
     id: string;
     date: string;        // ISO or original string
@@ -185,16 +190,13 @@ export const BankReconciler: React.FC = () => {
     const handleSave = async () => {
         setSaveStatus('saving');
         try {
-            // 1. Load existing Unified Transactions
-            const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
-            let existingTransactions: EvoTransaction[] = [];
-            if (records.length > 0) {
-                records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                existingTransactions = records[0].payload.transactions || [];
-            }
+            // 1. Save Bank Movements to Unified Store
+            const canonicalMovements = movements.map(bankMapper.toCanonical);
+            await evoStore.movimientosBancarios.saveAll(canonicalMovements);
 
-            // 2. Map new movements to EvoTransaction
-            const newTransactions: EvoTransaction[] = movements.map(m => createEvoTransaction({
+            // 2. Create Financial Records (Ingresos/Gastos) from Bank Movements
+            // This effectively "classifies" them as pending transactions
+            const newTransactions = movements.map(m => createEvoTransaction({
                 id: m.id, // Keep generated ID
                 date: m.date,
                 concept: m.description,
@@ -202,20 +204,24 @@ export const BankReconciler: React.FC = () => {
                 type: m.type === 'income' ? 'ingreso' : 'gasto',
                 source: 'bank-reconciler',
                 metadata: {
-                    originalAmount: m.amount
+                    originalAmount: m.amount,
+                    bankMovementId: m.id
                 }
             }));
 
-            // 3. Combine and Save Snapshot
-            const updatedTransactions = [...existingTransactions, ...newTransactions];
+            // Map to canonical RegistroFinanciero and save
+            const canonicalRegistros = newTransactions.map(ingresosMapper.toCanonical);
+            // We append to existing, but saveAll overwrites the list if we pass the whole list.
+            // evoStore.registrosFinancieros.add() adds one by one, which is slow for many.
+            // Better to get all, append, and saveAll.
 
-            await dataStore.saveRecord('evo-transactions', {
-                transactions: updatedTransactions,
-                updatedAt: new Date().toISOString(),
-                count: updatedTransactions.length,
-            });
+            const existingRegistros = await evoStore.registrosFinancieros.getAll();
+            // Filter out duplicates if any (by ID)
+            const newRegistrosFiltered = canonicalRegistros.filter(r => !existingRegistros.some(e => e.id === r.id));
 
-            // 4. (Optional) Save Bank Reconciler history
+            await evoStore.registrosFinancieros.saveAll([...existingRegistros, ...newRegistrosFiltered]);
+
+            // 3. (Optional) Save Bank Reconciler history (Legacy log)
             await dataStore.saveRecord('bank-reconciler', {
                 action: 'import',
                 movementsAdded: newTransactions.length,
@@ -229,6 +235,26 @@ export const BankReconciler: React.FC = () => {
             setSaveStatus('error');
             setErrorMessage('Failed to save movements.');
         }
+    };
+
+    const handleDownloadReviewCsv = () => {
+        const header = 'date,description,amount,type';
+        const rows = movements.map(m => [
+            m.date,
+            `"${m.description.replace(/"/g, '""')}"`,
+            m.amount.toFixed(2),
+            m.type
+        ].join(','));
+        const csvContent = [header, ...rows].join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `conciliacion_bancaria_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     };
 
     // --- Render Helpers ---
@@ -264,7 +290,7 @@ export const BankReconciler: React.FC = () => {
                     </button>
                     <input
                         type="file"
-                        accept="application/pdf"
+                        accept=".pdf"
                         ref={pdfInputRef}
                         className="hidden"
                         onChange={handlePdfFileChange}
@@ -290,12 +316,12 @@ export const BankReconciler: React.FC = () => {
                 <div className="bg-white dark:bg-gray-800 rounded-lg border border-dashed border-gray-300 dark:border-gray-700 p-12 text-center">
                     <Upload className="mx-auto h-12 w-12 text-gray-400" />
                     <h3 className="mt-2 text-sm font-medium text-gray-900 dark:text-white">No file selected</h3>
-                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Upload a CSV file to get started.</p>
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Upload a CSV or PDF file to get started.</p>
                     <button
                         onClick={() => fileInputRef.current?.click()}
                         className="mt-6 inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-indigo-600 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/20 dark:text-indigo-300"
                     >
-                        Select File
+                        Select CSV File
                     </button>
                 </div>
             )}
@@ -419,6 +445,12 @@ export const BankReconciler: React.FC = () => {
                                 <AlertCircle size={16} /> {errorMessage}
                             </span>
                         )}
+                        <button
+                            onClick={handleDownloadReviewCsv}
+                            className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center gap-2 text-sm"
+                        >
+                            <Download size={16} /> Download CSV
+                        </button>
                         <button
                             onClick={handleSave}
                             disabled={saveStatus === 'saving' || saveStatus === 'success'}

@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calculator, DollarSign, Calendar, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
+import { Calculator, DollarSign, Calendar, TrendingUp, TrendingDown, AlertCircle, Save, CheckCircle } from 'lucide-react';
 import { dataStore } from '../../core/data/dataStore';
+import { evoStore } from '../../core/evoappDataStore';
+import { ingresosMapper } from '../../core/mappers/ingresosMapper';
+import { taxPaymentMapper } from '../../core/mappers/taxPaymentMapper';
+import { taxCalcMapper } from '../../core/mappers/taxCalcMapper';
+import type { RegistroFinanciero, PagoImpuesto } from '../../core/evoappDataModel';
 import { type EvoTransaction } from '../../core/domain/evo-transaction';
 import type { ToolDefinition } from '../shared/types';
 import { TaxProfileForm } from './components/TaxProfileForm';
@@ -8,21 +13,61 @@ import { getCalculatorForRegimen } from './calculators/factory';
 
 
 export const TaxCalculationModule: React.FC = () => {
-    const [transactions, setTransactions] = useState<EvoTransaction[]>([]);
+    const [registros, setRegistros] = useState<RegistroFinanciero[]>([]);
+    const [pagos, setPagos] = useState<PagoImpuesto[]>([]);
     const [loading, setLoading] = useState(true);
     const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
 
     useEffect(() => {
         const load = async () => {
             setLoading(true);
             try {
-                const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
-                if (records.length > 0) {
-                    records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                    setTransactions(records[0].payload.transactions || []);
+                // 1. Load Registros Financieros (Income/Expenses)
+                const canonicalRegistros = await evoStore.registrosFinancieros.getAll();
+                let loadedRegistros = canonicalRegistros;
+
+                if (loadedRegistros.length === 0) {
+                    // Fallback/Migration check (lazy)
+                    const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                    if (records.length > 0) {
+                        const transactions = records[0].payload.transactions || [];
+                        // We don't migrate here to avoid duplication if other modules did it.
+                        // Just map for display/calc
+                        loadedRegistros = transactions
+                            .filter(t => t.type === 'ingreso' || t.type === 'gasto')
+                            .map(ingresosMapper.toCanonical);
+                    }
                 }
+                setRegistros(loadedRegistros);
+
+                // 2. Load Tax Payments
+                const canonicalPagos = await evoStore.pagosImpuestos.getAll();
+                let loadedPagos = canonicalPagos;
+
+                if (loadedPagos.length === 0) {
+                    // Fallback
+                    const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                    if (records.length > 0) {
+                        const transactions = records[0].payload.transactions || [];
+                        loadedPagos = transactions
+                            .filter(t => t.type === 'impuesto')
+                            .map(t => ({
+                                id: t.id,
+                                date: t.date,
+                                concept: t.concept,
+                                amount: t.amount,
+                                type: (t.metadata?.taxType as any) || 'Other',
+                                status: 'Paid' as 'Paid',
+                                metadata: t.metadata
+                            }))
+                            .map(taxPaymentMapper.toCanonical);
+                    }
+                }
+                setPagos(loadedPagos);
+
             } catch (e) {
-                console.error("Failed to load transactions", e);
+                console.error("Failed to load data", e);
             } finally {
                 setLoading(false);
             }
@@ -39,15 +84,8 @@ export const TaxCalculationModule: React.FC = () => {
             setProfile(p);
         };
         loadProfile();
-    }, [loading]); // Reload when loading finishes (or maybe listen to store changes?)
-    // Ideally we should lift state or use a context, but for now let's just reload.
-    // Actually, TaxProfileForm updates the store. We might not see the update immediately here unless we trigger a reload.
-    // Let's add a simple event listener or just reload on focus? 
-    // For Phase 2, let's just rely on the user refreshing or us passing a callback.
-    // Better yet: pass a callback to TaxProfileForm to notify parent?
-    // Or just re-fetch profile every time we render? No.
+    }, [loading]);
 
-    // Let's add a refresh trigger.
     const [refreshTrigger, setRefreshTrigger] = useState(0);
 
     useEffect(() => {
@@ -59,21 +97,24 @@ export const TaxCalculationModule: React.FC = () => {
     }, [refreshTrigger]);
 
     const stats = useMemo(() => {
-        const periodTransactions = transactions.filter(t => t.date.startsWith(month));
+        // Filter by month
+        const periodRegistros = registros.filter(r => r.fecha.startsWith(month));
+        const periodPagos = pagos.filter(p => p.fechaPago.startsWith(month));
 
         let income = 0;
         let expenses = 0;
         let taxPaid = 0;
 
-        periodTransactions.forEach(t => {
-            if (t.type === 'ingreso') income += t.amount;
-            else if (t.type === 'gasto') expenses += t.amount;
-            else if (t.type === 'impuesto') taxPaid += t.amount;
+        periodRegistros.forEach(r => {
+            if (r.tipo === 'ingreso') income += r.monto;
+            else if (r.tipo === 'gasto') expenses += r.monto;
+        });
+
+        periodPagos.forEach(p => {
+            taxPaid += p.monto;
         });
 
         // Use Calculator Strategy
-        // We need to use the imported factory. Since it's a synchronous helper, we can just import it at top level.
-        // But to avoid circular deps or just for cleanliness, let's import it at top level.
         const calculator = getCalculatorForRegimen(profile?.regimenFiscal);
 
         const baseResult = calculator.calculateBase({ income, expenses });
@@ -96,7 +137,31 @@ export const TaxCalculationModule: React.FC = () => {
             taxPaid,
             netPayable
         };
-    }, [transactions, month, profile]);
+    }, [registros, pagos, month, profile]);
+
+    const handleSaveSnapshot = async () => {
+        setSaveStatus('saving');
+        try {
+            const year = parseInt(month.split('-')[0]);
+            const monthNum = parseInt(month.split('-')[1]);
+
+            const calculation = taxCalcMapper.createCalculation(
+                monthNum,
+                year,
+                stats.income,
+                stats.expenses,
+                stats.estimatedIsr,
+                stats.estimatedIva
+            );
+
+            await evoStore.calculosImpuestos.add(calculation);
+            setSaveStatus('success');
+            setTimeout(() => setSaveStatus('idle'), 3000);
+        } catch (e) {
+            console.error('Failed to save calculation', e);
+            setSaveStatus('error');
+        }
+    };
 
     const formatCurrency = (val: number) => val.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
@@ -191,6 +256,26 @@ export const TaxCalculationModule: React.FC = () => {
                     <div className="mt-6 flex items-start gap-2 text-xs text-slate-400 bg-white/5 p-3 rounded-lg">
                         <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
                         <p>Esta es una estimación preliminar. Consulta a tu contador para la declaración oficial.</p>
+                    </div>
+
+                    <div className="mt-4">
+                        <button
+                            onClick={handleSaveSnapshot}
+                            disabled={saveStatus === 'saving' || saveStatus === 'success'}
+                            className="w-full py-2 bg-white/10 hover:bg-white/20 text-white rounded-md transition-colors flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+                        >
+                            {saveStatus === 'success' ? (
+                                <>
+                                    <CheckCircle size={16} className="text-green-400" /> Guardado
+                                </>
+                            ) : saveStatus === 'saving' ? (
+                                'Guardando...'
+                            ) : (
+                                <>
+                                    <Save size={16} /> Guardar Estimación
+                                </>
+                            )}
+                        </button>
                     </div>
                 </div>
             </div>

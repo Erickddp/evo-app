@@ -1,3 +1,4 @@
+// TODO: Refactor to use 'Cliente' from src/core/evoappDataModel.ts in Phase 2
 export interface Client {
     id: string;
     rfc: string;
@@ -11,6 +12,7 @@ export interface Client {
     updatedAt: string;
 }
 
+// TODO: Refactor to use 'Factura' from src/core/evoappDataModel.ts in Phase 2
 export interface Invoice {
     id: string;
     folio: string;

@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { dataStore } from '../../../core/data/dataStore';
+import { evoStore } from '../../../core/evoappDataStore';
+import { facturasMapper } from '../../../core/mappers/facturasMapper';
+import { ingresosMapper } from '../../../core/mappers/ingresosMapper';
 import type { Client, Invoice, FacturaPayload } from '../types';
-import { type EvoTransaction, createEvoTransaction } from '../../../core/domain/evo-transaction';
+import { createEvoTransaction } from '../../../core/domain/evo-transaction';
 
 const TOOL_ID = 'facturas-manager';
 
@@ -13,20 +16,46 @@ export function useFacturas() {
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const records = await dataStore.listRecords<FacturaPayload>(TOOL_ID);
-            const loadedClients: Client[] = [];
-            const loadedInvoices: Invoice[] = [];
+            // 1. Try loading from Unified Store
+            const canonicalClients = await evoStore.clientes.getAll();
+            const canonicalInvoices = await evoStore.facturas.getAll();
 
-            records.forEach(record => {
-                if (record.payload.type === 'client') {
-                    loadedClients.push(record.payload.data as Client);
-                } else if (record.payload.type === 'invoice') {
-                    loadedInvoices.push(record.payload.data as Invoice);
+            if (canonicalClients.length > 0 || canonicalInvoices.length > 0) {
+                setClients(canonicalClients.map(facturasMapper.clientToLegacy));
+                setInvoices(canonicalInvoices.map(facturasMapper.invoiceToLegacy));
+            } else {
+                // 2. Migration: Check Legacy Store
+                console.log('No canonical facturas data, checking legacy store...');
+                const records = await dataStore.listRecords<FacturaPayload>(TOOL_ID);
+
+                if (records.length > 0) {
+                    const loadedClients: Client[] = [];
+                    const loadedInvoices: Invoice[] = [];
+
+                    records.forEach(record => {
+                        if (record.payload.type === 'client') {
+                            loadedClients.push(record.payload.data as Client);
+                        } else if (record.payload.type === 'invoice') {
+                            loadedInvoices.push(record.payload.data as Invoice);
+                        }
+                    });
+
+                    if (loadedClients.length > 0 || loadedInvoices.length > 0) {
+                        console.log(`Migrating ${loadedClients.length} clients and ${loadedInvoices.length} invoices to canonical store...`);
+
+                        // Save to new store
+                        if (loadedClients.length > 0) {
+                            await evoStore.clientes.saveAll(loadedClients.map(facturasMapper.clientToCanonical));
+                        }
+                        if (loadedInvoices.length > 0) {
+                            await evoStore.facturas.saveAll(loadedInvoices.map(facturasMapper.invoiceToCanonical));
+                        }
+
+                        setClients(loadedClients);
+                        setInvoices(loadedInvoices);
+                    }
                 }
-            });
-
-            setClients(loadedClients);
-            setInvoices(loadedInvoices);
+            }
         } catch (error) {
             console.error('Error loading facturas data:', error);
         } finally {
@@ -39,8 +68,9 @@ export function useFacturas() {
     }, [loadData]);
 
     const saveClient = async (client: Client) => {
-        const payload: FacturaPayload = { type: 'client', data: client };
-        await dataStore.saveRecord(TOOL_ID, payload);
+        // Save to Unified Store
+        await evoStore.clientes.add(facturasMapper.clientToCanonical(client));
+
         setClients(prev => {
             const others = prev.filter(c => c.id !== client.id);
             return [...others, client];
@@ -49,8 +79,8 @@ export function useFacturas() {
     };
 
     const updateClient = async (updatedClient: Client) => {
-        const payload: FacturaPayload = { type: 'client', data: updatedClient };
-        await dataStore.saveRecord(TOOL_ID, payload);
+        // Save to Unified Store
+        await evoStore.clientes.add(facturasMapper.clientToCanonical(updatedClient));
 
         setClients(prev => {
             const others = prev.filter(c => c.id !== updatedClient.id);
@@ -59,26 +89,21 @@ export function useFacturas() {
     };
 
     const saveInvoice = async (invoice: Invoice) => {
-        // 1. Save Invoice
-        const payload: FacturaPayload = { type: 'invoice', data: invoice };
-        await dataStore.saveRecord(TOOL_ID, payload);
+        // 1. Save Invoice to Unified Store
+        await evoStore.facturas.add(facturasMapper.invoiceToCanonical(invoice));
 
         setInvoices(prev => {
             const others = prev.filter(i => i.id !== invoice.id);
             return [...others, invoice];
         });
 
-        // 2. Sync with EvoTransaction
+        // 2. Sync with RegistrosFinancieros (Ingresos Manager)
         try {
-            const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
-            let existingTransactions: EvoTransaction[] = [];
-            if (records.length > 0) {
-                records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                existingTransactions = records[0].payload.transactions || [];
-            }
+            const allTransactions = await evoStore.registrosFinancieros.getAll();
 
-            // Find existing transaction for this invoice
-            const existingIndex = existingTransactions.findIndex(t => t.metadata?.invoiceId === invoice.id);
+            // Find existing transaction for this invoice (using referenceId which maps to metadata.invoiceId in legacy)
+            // In canonical model: referenciaId
+            const existingIndex = allTransactions.findIndex(t => t.referenciaId === invoice.id);
 
             const transactionData = {
                 date: invoice.invoiceDate,
@@ -89,30 +114,24 @@ export function useFacturas() {
                 metadata: {
                     invoiceId: invoice.id,
                     folio: invoice.folio,
-                    clientId: invoice.rfc // using RFC as client ID proxy or we could use client ID if available
+                    clientId: invoice.rfc
                 }
             };
 
-            let updatedTransactions = [...existingTransactions];
-
-            if (existingIndex >= 0) {
-                // Update existing
-                updatedTransactions[existingIndex] = {
-                    ...updatedTransactions[existingIndex],
-                    ...transactionData,
-                    amount: Math.abs(transactionData.amount)
-                };
-            } else {
-                // Create new
-                const newTransaction = createEvoTransaction(transactionData);
-                updatedTransactions.push(newTransaction);
-            }
-
-            await dataStore.saveRecord('evo-transactions', {
-                transactions: updatedTransactions,
-                updatedAt: new Date().toISOString(),
-                count: updatedTransactions.length,
+            // Create legacy transaction object to map it to canonical
+            // We use createEvoTransaction to ensure ID generation if needed, but we might be updating
+            const legacyTx = createEvoTransaction({
+                id: existingIndex >= 0 ? allTransactions[existingIndex].id : undefined,
+                ...transactionData
             });
+
+            // Map to canonical
+            const canonicalTx = ingresosMapper.toCanonical(legacyTx);
+            // Ensure referenciaId is set (mapper might look at metadata.referenciaId, but here we set it explicitly if needed)
+            canonicalTx.referenciaId = invoice.id;
+
+            // Save
+            await evoStore.registrosFinancieros.add(canonicalTx);
 
         } catch (e) {
             console.error('Error syncing invoice to transactions:', e);

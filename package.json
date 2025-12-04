@@ -11,6 +11,7 @@
     "server": "node server/index.js"
   },
   "dependencies": {
+    "chart.js": "^4.5.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
@@ -21,6 +22,7 @@
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.449",
     "react": "^19.2.0",
+    "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.9.6",
     "tailwindcss-animate": "^1.0.7",

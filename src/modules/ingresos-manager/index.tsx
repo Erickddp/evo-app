@@ -1,64 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { DollarSign, Plus, Trash2, Download, Search } from 'lucide-react';
 import type { ToolDefinition } from '../shared/types';
-import { dataStore } from '../../core/data/dataStore';
 import { type EvoTransaction, createEvoTransaction, calculateTotals } from '../../core/domain/evo-transaction';
-import { parseIngresosCsv } from './utils';
+// TODO: Refactor to use 'RegistroFinanciero' from src/core/evoappDataModel.ts in Phase 2
+
+import { parseIngresosCsv, loadMovementsFromStore, saveSnapshot } from './utils';
+import { useIncomeAnalytics } from './useIncomeAnalytics';
+import { AnalyticsPanel } from './AnalyticsPanel';
 
 // --- Helper Functions ---
-
-async function loadMovementsFromStore(): Promise<EvoTransaction[]> {
-    try {
-        // 1. Try loading from unified store
-        const unifiedRecords = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
-        if (unifiedRecords.length > 0) {
-            unifiedRecords.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-            return unifiedRecords[0].payload.transactions || [];
-        }
-
-        // 2. Migration: Try loading from legacy store
-        console.log('No unified data found, checking legacy Ingresos Manager data...');
-        const legacyRecords = await dataStore.listRecords<{ movements: any[] }>('ingresos-manager');
-        if (legacyRecords.length > 0) {
-            legacyRecords.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-            const legacyMovements = legacyRecords[0].payload.movements || [];
-
-            // Convert to EvoTransaction
-            const migrated: EvoTransaction[] = legacyMovements.map((m: any) => ({
-                id: m.id || crypto.randomUUID(),
-                date: m.date,
-                concept: m.concept,
-                amount: Math.abs(m.amount),
-                type: m.type || (m.amount >= 0 ? 'ingreso' : 'gasto'),
-                source: 'legacy-migration'
-            }));
-
-            if (migrated.length > 0) {
-                // Save immediately to unified store
-                await saveSnapshot(migrated);
-                console.log(`Migrated ${migrated.length} records to unified store.`);
-                return migrated;
-            }
-        }
-
-        return [];
-    } catch (e) {
-        console.error('Failed to load movements from dataStore', e);
-        return [];
-    }
-}
-
-async function saveSnapshot(transactions: EvoTransaction[]) {
-    try {
-        await dataStore.saveRecord('evo-transactions', {
-            transactions,
-            updatedAt: new Date().toISOString(),
-            count: transactions.length,
-        });
-    } catch (e) {
-        console.error('Failed to save snapshot to dataStore', e);
-    }
-}
 
 function todayAsIso(): string {
     return new Date().toISOString().split('T')[0];
@@ -79,6 +29,16 @@ export const IngresosManagerTool: React.FC = () => {
     const [isLoaded, setIsLoaded] = useState(false);
     const [filterText, setFilterText] = useState('');
 
+    // Analytics Hook
+    const {
+        view,
+        setView,
+        selectedYear,
+        setSelectedYear,
+        filteredMovements: timeFilteredMovements,
+        availableYears
+    } = useIncomeAnalytics(movements);
+
     // Load initial data
     useEffect(() => {
         loadMovementsFromStore().then(data => {
@@ -87,8 +47,15 @@ export const IngresosManagerTool: React.FC = () => {
         });
     }, []);
 
-    // Derived state for stats
-    const stats = useMemo(() => calculateTotals(movements), [movements]);
+    // Apply text filter on top of time filter
+    const finalFilteredMovements = useMemo(() => {
+        return timeFilteredMovements.filter((m) =>
+            m.concept.toLowerCase().includes(filterText.toLowerCase())
+        );
+    }, [timeFilteredMovements, filterText]);
+
+    // Derived state for stats (based on current view)
+    const stats = useMemo(() => calculateTotals(finalFilteredMovements), [finalFilteredMovements]);
 
     // Persist whenever movements change (only after initial load)
     useEffect(() => {
@@ -103,7 +70,7 @@ export const IngresosManagerTool: React.FC = () => {
 
         const parsedAmount = parseFloat(amountStr);
         if (isNaN(parsedAmount) || parsedAmount <= 0) {
-            alert('Please enter a valid positive amount.');
+            alert('Ingresa un monto positivo válido.');
             return;
         }
 
@@ -138,8 +105,8 @@ export const IngresosManagerTool: React.FC = () => {
         const header = 'Fecha,Concepto,Ingreso,Gasto';
         let csvContent = header;
 
-        if (movements.length > 0) {
-            const rows = movements.map((m) => {
+        if (finalFilteredMovements.length > 0) {
+            const rows = finalFilteredMovements.map((m) => {
                 const safeConcept = `"${m.concept.replace(/"/g, '""')}"`;
                 let ingreso = '';
                 let gasto = '';
@@ -147,8 +114,6 @@ export const IngresosManagerTool: React.FC = () => {
                 if (m.type === 'ingreso') {
                     ingreso = m.amount.toString();
                 } else {
-                    // Treat everything else as expense for export purposes if it exists, 
-                    // though we only allow ingreso/gasto now.
                     gasto = m.amount.toString();
                 }
 
@@ -163,7 +128,7 @@ export const IngresosManagerTool: React.FC = () => {
         const link = document.createElement('a');
         link.href = url;
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        link.download = `evorix-movimientos-${timestamp}.csv`;
+        link.download = `evorix-movimientos-${view}-${timestamp}.csv`;
         link.click();
         URL.revokeObjectURL(url);
     };
@@ -178,10 +143,6 @@ export const IngresosManagerTool: React.FC = () => {
         link.click();
         URL.revokeObjectURL(url);
     };
-
-    const filteredMovements = movements.filter((m) =>
-        m.concept.toLowerCase().includes(filterText.toLowerCase())
-    );
 
     const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -249,6 +210,75 @@ Errores: ${result.stats.errors}`);
                         {formatCurrency(stats.netBalance)}
                     </div>
                 </div>
+            </div>
+
+            {/* Analytics Panel */}
+            <AnalyticsPanel
+                movements={movements}
+                currentView={view}
+                selectedYear={selectedYear}
+            />
+
+            {/* View Controls */}
+            <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 dark:border-gray-700 pb-4">
+                <button
+                    onClick={() => setView('current-month')}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'current-month'
+                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
+                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                        }`}
+                >
+                    Mes Actual
+                </button>
+                <button
+                    onClick={() => setView('prev-month')}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'prev-month'
+                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
+                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                        }`}
+                >
+                    Mes Anterior
+                </button>
+                <button
+                    onClick={() => setView('last-3-months')}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'last-3-months'
+                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
+                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                        }`}
+                >
+                    Últimos 3 Meses
+                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setView('year')}
+                        className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'year'
+                            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
+                            : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                            }`}
+                    >
+                        Por Año
+                    </button>
+                    {view === 'year' && (
+                        <select
+                            value={selectedYear}
+                            onChange={(e) => setSelectedYear(Number(e.target.value))}
+                            className="text-sm border-gray-300 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white py-1"
+                        >
+                            {availableYears.map(y => (
+                                <option key={y} value={y}>{y}</option>
+                            ))}
+                        </select>
+                    )}
+                </div>
+                <button
+                    onClick={() => setView('historic')}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'historic'
+                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
+                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                        }`}
+                >
+                    Histórico
+                </button>
             </div>
 
             {/* Input Form */}
@@ -368,14 +398,14 @@ Errores: ${result.stats.errors}`);
                             </tr>
                         </thead>
                         <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                            {filteredMovements.length === 0 ? (
+                            {finalFilteredMovements.length === 0 ? (
                                 <tr>
                                     <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                                         No movements found.
                                     </td>
                                 </tr>
                             ) : (
-                                filteredMovements.map((m) => (
+                                finalFilteredMovements.map((m) => (
                                     <tr key={m.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{m.date}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{m.concept}</td>

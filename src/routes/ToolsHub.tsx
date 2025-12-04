@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react';
 import { toolsRegistry } from '../modules/registry';
 import { ErrorBoundary } from '../core/errors/ErrorBoundary';
+import { ToolsSidebar } from './ToolsSidebar';
 
 export function ToolsHub() {
   const [selectedToolId, setSelectedToolId] = useState<string | null>(() => {
     return localStorage.getItem('evorix-selected-tool');
   });
+
+  // State for sidebar collapse. Defaults to false (expanded).
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const selectedTool = toolsRegistry.find((t) => t.meta.id === selectedToolId);
 
@@ -15,48 +19,25 @@ export function ToolsHub() {
     }
   }, [selectedToolId]);
 
+  const handleSelectTool = (id: string) => {
+    setSelectedToolId(id);
+    // Auto-collapse sidebar when a tool is selected
+    setIsSidebarCollapsed(true);
+  };
+
   return (
     <div className="h-full flex gap-6">
-      {/* Tools List */}
-      <div className="w-1/3 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden">
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Available Tools</h2>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2 space-y-2">
-          {toolsRegistry.length === 0 ? (
-            <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
-              No tools installed.
-            </div>
-          ) : (
-            toolsRegistry.map((tool) => (
-              <button
-                key={tool.meta.id}
-                onClick={() => setSelectedToolId(tool.meta.id)}
-                className={`w-full text-left p-3 rounded-md flex items-start gap-3 transition-colors ${selectedToolId === tool.meta.id
-                  ? 'bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800'
-                  : 'hover:bg-gray-50 dark:hover:bg-gray-700/50 border border-transparent'
-                  } `}
-              >
-                <div className="p-2 bg-white dark:bg-gray-700 rounded-md shadow-sm text-blue-600 dark:text-blue-400">
-                  {(() => {
-                    const Icon = tool.meta.icon;
-                    return Icon ? <Icon size={20} /> : null;
-                  })()}
-                </div>
-                <div>
-                  <h3 className="font-medium text-gray-900 dark:text-gray-100">{tool.meta.name}</h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
-                    {tool.meta.description}
-                  </p>
-                </div>
-              </button>
-            ))
-          )}
-        </div>
-      </div>
+      {/* Collapsible Sidebar */}
+      <ToolsSidebar
+        tools={toolsRegistry}
+        selectedToolId={selectedToolId}
+        onSelectTool={handleSelectTool}
+        collapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+      />
 
       {/* Active Tool Area */}
-      <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden">
+      <div className="flex-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden transition-all duration-300">
         {selectedTool ? (
           <div className="flex flex-col h-full">
             <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-800/50">

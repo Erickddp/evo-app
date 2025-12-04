@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, TrendingUp, DollarSign, Info } from 'lucide-react';
 import { dataStore } from '../../core/data/dataStore';
+import { evoStore } from '../../core/evoappDataStore';
+import { taxPaymentMapper } from '../../core/mappers/taxPaymentMapper';
+import { ingresosMapper } from '../../core/mappers/ingresosMapper';
 import { type EvoTransaction, createEvoTransaction } from '../../core/domain/evo-transaction';
+import type { TaxPayment } from './types';
 
 
 // --- Constants ---
@@ -23,7 +27,7 @@ function todayAsIso(): string {
 // --- Component ---
 
 export const TaxTrackerTool: React.FC = () => {
-    const [payments, setPayments] = useState<EvoTransaction[]>([]);
+    const [payments, setPayments] = useState<TaxPayment[]>([]);
     const [allTransactions, setAllTransactions] = useState<EvoTransaction[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -37,47 +41,50 @@ export const TaxTrackerTool: React.FC = () => {
     useEffect(() => {
         const load = async () => {
             try {
-                // Load Unified Transactions
-                const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
-                let transactions: EvoTransaction[] = [];
+                // 1. Load Tax Payments from Unified Store
+                const canonicalPayments = await evoStore.pagosImpuestos.getAll();
+                let loadedPayments: TaxPayment[] = [];
 
-                if (records.length > 0) {
-                    records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                    transactions = records[0].payload.transactions || [];
-                }
-
-                // Migration Check for Tax Payments
-                const taxPayments = transactions.filter(t => t.type === 'impuesto');
-
-                if (taxPayments.length === 0) {
-                    // Check legacy tax-tracker store
-                    const legacyRecords = await dataStore.listRecords<any>('tax-tracker');
-                    if (legacyRecords.length > 0) {
-                        console.log('Migrating legacy tax payments...');
-                        const legacyItems = legacyRecords.map(r => r.payload);
-                        const migratedPayments = legacyItems.map(p => createEvoTransaction({
-                            id: p.id,
-                            date: p.date,
-                            concept: p.concept,
-                            amount: p.amount,
-                            type: 'impuesto',
-                            source: 'legacy-tax-tracker',
-                            metadata: { taxType: p.type } // Store specific tax type in metadata
-                        }));
-
-                        transactions = [...transactions, ...migratedPayments];
-
-                        // Save immediately
-                        await dataStore.saveRecord('evo-transactions', {
-                            transactions,
-                            updatedAt: new Date().toISOString(),
-                            count: transactions.length
-                        });
+                if (canonicalPayments.length > 0) {
+                    loadedPayments = canonicalPayments.map(taxPaymentMapper.toLegacy);
+                } else {
+                    // Migration Check (if hooks.ts didn't run or empty)
+                    // We rely on hooks.ts or just check here too for robustness
+                    const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                    if (records.length > 0) {
+                        const transactions = records[0].payload.transactions || [];
+                        const legacyItems = transactions.filter(t => t.type === 'impuesto');
+                        if (legacyItems.length > 0) {
+                            loadedPayments = legacyItems.map(t => ({
+                                id: t.id,
+                                date: t.date,
+                                concept: t.concept,
+                                amount: t.amount,
+                                type: (t.metadata?.taxType as any) || 'Other',
+                                status: 'Paid',
+                                metadata: t.metadata
+                            }));
+                            // We could migrate here too, but let's assume hooks.ts or lazy migration handles it.
+                            // For now, just display.
+                        }
                     }
                 }
+                setPayments(loadedPayments);
 
-                setAllTransactions(transactions);
-                setPayments(transactions.filter(t => t.type === 'impuesto'));
+                // 2. Load Income/Expenses for Projections (from RegistrosFinancieros)
+                const canonicalRegistros = await evoStore.registrosFinancieros.getAll();
+                let loadedTransactions: EvoTransaction[] = [];
+
+                if (canonicalRegistros.length > 0) {
+                    loadedTransactions = canonicalRegistros.map(ingresosMapper.toLegacy);
+                } else {
+                    // Fallback to evo-transactions if migration hasn't happened
+                    const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                    if (records.length > 0) {
+                        loadedTransactions = records[0].payload.transactions || [];
+                    }
+                }
+                setAllTransactions(loadedTransactions);
 
             } catch (e) {
                 console.error('Failed to load data', e);
@@ -122,26 +129,21 @@ export const TaxTrackerTool: React.FC = () => {
         const amount = parseFloat(amountStr);
         if (isNaN(amount)) return;
 
-        const newPayment = createEvoTransaction({
+        const newPaymentLegacy: TaxPayment = {
+            id: crypto.randomUUID(),
             date,
             concept,
             amount,
-            type: 'impuesto',
-            source: 'tax-tracker',
+            type,
+            status: 'Paid',
             metadata: { taxType: type }
-        });
+        };
 
         try {
-            const updatedTransactions = [...allTransactions, newPayment];
+            // Save to Unified Store
+            await evoStore.pagosImpuestos.add(taxPaymentMapper.toCanonical(newPaymentLegacy));
 
-            await dataStore.saveRecord('evo-transactions', {
-                transactions: updatedTransactions,
-                updatedAt: new Date().toISOString(),
-                count: updatedTransactions.length
-            });
-
-            setAllTransactions(updatedTransactions);
-            setPayments(updatedTransactions.filter(t => t.type === 'impuesto'));
+            setPayments(prev => [...prev, newPaymentLegacy]);
 
             // Reset form
             setConcept('');

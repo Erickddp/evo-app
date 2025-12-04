@@ -19,6 +19,8 @@ export const DEFAULT_DASHBOARD_CONFIG: DashboardConfig = {
         'financial-summary',
         'facturas-overview',
         'tax-overview',
-        'cfdi-overview'
+        'cfdi-overview',
+        'income-balance',
+        'income-trend'
     ]
 };

@@ -1,4 +1,4 @@
-import type { TaxPayment } from './types';
+import type { TaxPayment, MonthlyTaxSummary } from './types';
 
 export function sanitizeTaxPayment(raw: any): TaxPayment {
     return {
@@ -12,74 +12,60 @@ export function sanitizeTaxPayment(raw: any): TaxPayment {
     };
 }
 
-export interface TaxDashboardStats {
-    currentYearTotal: number;
-    lastYearTotal: number;
-    monthlySeries: { month: string; amount: number }[];
-    lastPaymentDate?: string;
-    lastPaymentAmount?: number;
-    ivaPaidYear: number;
-    isrPaidYear: number;
+export function getCurrentYear(): number {
+    return new Date().getFullYear();
 }
 
-export function calculateTaxStats(payments: TaxPayment[]): TaxDashboardStats {
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const lastYear = currentYear - 1;
+export function getPaymentsForYear(payments: TaxPayment[], year: number): TaxPayment[] {
+    return payments.filter(p => {
+        const pYear = new Date(p.date).getFullYear();
+        return pYear === year;
+    });
+}
 
-    let currentYearTotal = 0;
-    let lastYearTotal = 0;
-    let ivaPaidYear = 0;
-    let isrPaidYear = 0;
-    const monthlyMap = new Map<string, number>();
+export function getYearTotals(payments: TaxPayment[]): { totalYear: number; totalIVA: number } {
+    return payments.reduce(
+        (acc, curr) => {
+            acc.totalYear += curr.amount;
+            if (curr.type === 'IVA') {
+                acc.totalIVA += curr.amount;
+            }
+            return acc;
+        },
+        { totalYear: 0, totalIVA: 0 }
+    );
+}
 
-    // Initialize last 12 months in map
-    for (let i = 11; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const key = d.toISOString().slice(0, 7); // YYYY-MM
-        monthlyMap.set(key, 0);
+export function getLastPayment(payments: TaxPayment[]): TaxPayment | null {
+    if (payments.length === 0) return null;
+    // Sort descending by date
+    const sorted = [...payments].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return sorted[0];
+}
+
+export function getMonthlyTaxSummary(payments: TaxPayment[]): MonthlyTaxSummary[] {
+    const summary: MonthlyTaxSummary[] = [];
+
+    // Initialize 12 months
+    for (let i = 1; i <= 12; i++) {
+        summary.push({ month: i, total: 0, iva: 0 });
     }
 
-    // Sort payments by date ascending for processing
-    const sortedPayments = [...payments].sort((a, b) => a.date.localeCompare(b.date));
+    for (const p of payments) {
+        const date = new Date(p.date);
+        // Ensure we are only processing valid dates. 
+        // Note: The caller is responsible for filtering by year if needed.
+        // This function aggregates WHATEVER payments are passed to it by month.
+        // Usually, you'd pass getPaymentsForYear(payments, year) result here.
 
-    for (const p of sortedPayments) {
-        const amount = p.amount;
-        const pDate = new Date(p.date);
-        const pYear = pDate.getFullYear();
-        const monthKey = p.date.slice(0, 7);
-
-        if (pYear === currentYear) {
-            currentYearTotal += amount;
-            if (p.type === 'IVA') ivaPaidYear += amount;
-            if (p.type === 'ISR') isrPaidYear += amount;
-        } else if (pYear === lastYear) {
-            lastYearTotal += amount;
-        }
-
-        // We only care about the months we initialized in the map for the chart/series
-        // But if we want all history, we might need to handle it differently.
-        // For the dashboard sparkline/bar chart, usually last 6-12 months is good.
-        // The existing dashboard code initialized last 6 months.
-        // Let's stick to the map we created (last 12 months) or update it if the key exists.
-        if (monthlyMap.has(monthKey)) {
-            monthlyMap.set(monthKey, (monthlyMap.get(monthKey) || 0) + amount);
+        const monthIndex = date.getMonth(); // 0-11
+        if (monthIndex >= 0 && monthIndex < 12) {
+            summary[monthIndex].total += p.amount;
+            if (p.type === 'IVA') {
+                summary[monthIndex].iva += p.amount;
+            }
         }
     }
 
-    const monthlySeries = Array.from(monthlyMap.entries())
-        .map(([month, amount]) => ({ month, amount }))
-        .sort((a, b) => a.month.localeCompare(b.month));
-
-    const lastPayment = sortedPayments.length > 0 ? sortedPayments[sortedPayments.length - 1] : undefined;
-
-    return {
-        currentYearTotal,
-        lastYearTotal,
-        monthlySeries,
-        lastPaymentDate: lastPayment?.date,
-        lastPaymentAmount: lastPayment?.amount,
-        ivaPaidYear,
-        isrPaidYear
-    };
+    return summary;
 }
