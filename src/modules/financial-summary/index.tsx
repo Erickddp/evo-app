@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { PieChart, ArrowUpCircle, ArrowDownCircle, DollarSign, TrendingUp, Activity, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
-import { useFinancialData, type PeriodFilter, type NormalizedMovement } from './hooks/useFinancialData';
+import { useFinancialData, type NormalizedMovement } from './hooks/useFinancialData';
 import { TrendChart } from './components/TrendChart';
 
 // --- Components ---

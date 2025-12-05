@@ -25,7 +25,7 @@ describe('Ingresos Manager Utils', () => {
         });
 
         it('should parse old schema correctly', () => {
-            const csv = `Fecha,Concepto,Monto,Tipo
+            const _csv = `Fecha,Concepto,Monto,Tipo
 2023-08-01,Salary,5000,Ingreso
 2023-08-02,Rent,1500,Gasto`;
             // The parser is strict about "Fecha,Concepto,Ingreso,Gasto" now, so this test might fail if the parser throws.

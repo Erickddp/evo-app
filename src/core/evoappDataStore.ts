@@ -1,4 +1,4 @@
-import { dataStore, type StoredRecord } from './data/dataStore';
+import { dataStore } from './data/dataStore';
 import type {
     RegistroFinanciero,
     Factura,
@@ -37,7 +37,11 @@ interface UnifiedPayload<T> {
 }
 
 class EntityStore<T extends { id: string }> {
-    constructor(private entityType: EntityType) { }
+    private entityType: EntityType;
+
+    constructor(entityType: EntityType) {
+        this.entityType = entityType;
+    }
 
     async getAll(): Promise<T[]> {
         const records = await dataStore.listRecords<UnifiedPayload<T>>(this.entityType);

@@ -1,6 +1,6 @@
-import React from 'react';
+
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { Tool } from '../modules/registry';
+import type { Tool } from '../modules/registry';
 
 interface ToolsSidebarProps {
     tools: Tool[];

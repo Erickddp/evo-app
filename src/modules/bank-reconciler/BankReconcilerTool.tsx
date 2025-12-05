@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Upload, FileText, Download, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { parsePdfStatement } from './pdfParser';
-import type { ParsedPdfResult, BankMovement } from './types';
+import type { ParsedPdfResult } from './types';
 import { downloadMovementsAsCsv, buildBackupCsvFilename } from './csvExport';
 
 export const BankReconcilerTool: React.FC = () => {

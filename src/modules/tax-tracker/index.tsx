@@ -4,7 +4,7 @@ import { dataStore } from '../../core/data/dataStore';
 import { evoStore } from '../../core/evoappDataStore';
 import { taxPaymentMapper } from '../../core/mappers/taxPaymentMapper';
 import { ingresosMapper } from '../../core/mappers/ingresosMapper';
-import { type EvoTransaction, createEvoTransaction } from '../../core/domain/evo-transaction';
+import { type EvoTransaction } from '../../core/domain/evo-transaction';
 import type { TaxPayment } from './types';
 
 
