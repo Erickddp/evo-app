@@ -2,14 +2,20 @@ import { useState, useEffect } from 'react';
 import { toolsRegistry } from '../modules/registry';
 import { ErrorBoundary } from '../core/errors/ErrorBoundary';
 import { ToolsSidebar } from '../components/ToolsSidebar';
+import { Menu } from 'lucide-react';
 
 export function ToolsHub() {
   const [selectedToolId, setSelectedToolId] = useState<string | null>(() => {
     return localStorage.getItem('evorix-selected-tool');
   });
 
-  // State for sidebar collapse. Defaults to false (expanded).
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // State for sidebar collapse. Defaults to collapsed on mobile, expanded on desktop.
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768;
+    }
+    return false;
+  });
 
   const selectedTool = toolsRegistry.find((t) => t.meta.id === selectedToolId);
 
@@ -21,12 +27,14 @@ export function ToolsHub() {
 
   const handleSelectTool = (id: string) => {
     setSelectedToolId(id);
-    // Auto-collapse sidebar when a tool is selected
-    setIsSidebarCollapsed(true);
+    // Auto-collapse sidebar when a tool is selected ONLY on mobile
+    if (window.innerWidth < 768) {
+      setIsSidebarCollapsed(true);
+    }
   };
 
   return (
-    <div className="h-full flex gap-6">
+    <div className="h-full flex gap-6 relative">
       {/* Collapsible Sidebar */}
       <ToolsSidebar
         tools={toolsRegistry}
@@ -42,6 +50,15 @@ export function ToolsHub() {
           <div className="flex flex-col h-full">
             <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-800/50">
               <div className="flex items-center gap-2">
+                {/* Mobile Sidebar Trigger */}
+                <button
+                  onClick={() => setIsSidebarCollapsed(false)}
+                  className="md:hidden p-2 -ml-2 mr-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
+                  aria-label="Open sidebar"
+                >
+                  <Menu size={20} />
+                </button>
+
                 {(() => {
                   const Icon = selectedTool.meta.icon;
                   return Icon ? <Icon size={18} className="text-gray-500" /> : null;
@@ -77,7 +94,16 @@ export function ToolsHub() {
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 relative">
+            {/* Mobile Sidebar Trigger for Empty State */}
+            <button
+              onClick={() => setIsSidebarCollapsed(false)}
+              className="absolute top-4 left-4 md:hidden p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
+              aria-label="Open sidebar"
+            >
+              <Menu size={20} />
+            </button>
+
             <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4 text-gray-400">
               <span className="text-2xl">←</span>
             </div>
