@@ -31,6 +31,12 @@ export interface FinancialSummaryState {
     avgProfit: number;
 }
 
+export type PeriodFilter =
+    | { type: 'all' }
+    | { type: 'currentMonth' }
+    | { type: 'month'; year: number; month: number } // 1–12
+    | { type: 'custom'; start: string; end: string };
+
 export const normalizeMovements = (
     transactions: EvoTransaction[]
 ): NormalizedMovement[] => {
@@ -58,54 +64,69 @@ export const normalizeMovements = (
     return normalized.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 };
 
-export const calculateFinancialSummary = (
-    movements: NormalizedMovement[],
-    startDate?: string,
-    endDate?: string
-): FinancialSummaryState => {
-    // Filter by date range if provided
-    const filtered = movements.filter(m => {
-        if (startDate && m.date < startDate) return false;
-        if (endDate && m.date > endDate) return false;
-        return true;
-    });
+export const filterMovementsByPeriod = (movements: NormalizedMovement[], filter: PeriodFilter): NormalizedMovement[] => {
+    const now = new Date();
 
+    switch (filter.type) {
+        case 'currentMonth': {
+            const y = now.getFullYear();
+            const m = now.getMonth() + 1;
+            const prefix = `${y}-${m.toString().padStart(2, '0')}`;
+            return movements.filter(mv => mv.date.startsWith(prefix));
+        }
+        case 'month': {
+            const prefix = `${filter.year}-${filter.month.toString().padStart(2, '0')}`;
+            return movements.filter(mv => mv.date.startsWith(prefix));
+        }
+        case 'custom': {
+            return movements.filter(mv => mv.date >= filter.start && mv.date <= filter.end);
+        }
+        case 'all':
+        default:
+            return movements;
+    }
+};
+
+export const calculateFinancialSummary = (
+    movements: NormalizedMovement[]
+): FinancialSummaryState => {
     let totalIncome = 0;
     let totalExpenses = 0;
     let totalTaxes = 0;
     const monthlyMap = new Map<string, MonthlyData>();
 
-    filtered.forEach(m => {
+    // When plotting trends, we typically want ascending order for the chart, 
+    // even if movements are stored desc. We'll handle sorting of series at the end.
+
+    // Iterate movements to build totals and grouping
+    movements.forEach(m => {
         const month = m.date.substring(0, 7); // YYYY-MM
         if (!monthlyMap.has(month)) {
             monthlyMap.set(month, { month, income: 0, expenses: 0, taxes: 0 });
         }
         const monthData = monthlyMap.get(month)!;
 
+        // Ensure amount is treated as number just in case
+        const amt = Number(m.amount) || 0;
+
         if (m.kind === 'income') {
-            totalIncome += m.amount;
-            monthData.income += m.amount;
+            totalIncome += amt;
+            monthData.income += amt;
         } else if (m.kind === 'expense') {
-            totalExpenses += m.amount;
-            monthData.expenses += m.amount;
+            totalExpenses += amt;
+            monthData.expenses += amt;
         } else if (m.kind === 'tax') {
-            totalTaxes += m.amount;
-            monthData.taxes += m.amount;
+            totalTaxes += amt;
+            monthData.taxes += amt;
         }
     });
 
     const netProfit = totalIncome - totalExpenses - totalTaxes;
 
+    // Monthly series sorted by month ASC for the chart
     const monthlySeries = Array.from(monthlyMap.values())
         .sort((a, b) => a.month.localeCompare(b.month));
 
-    // Calculate averages
-    // If we have data, divide by number of unique months in the range, 
-    // or just the months present in data? 
-    // "Ingreso promedio mensual" usually implies over the selected period.
-    // If selected period is "This Year" (e.g. 5 months passed), we should divide by 5?
-    // Or divide by the number of months that actually have data?
-    // Let's use the number of months in the series for simplicity, or 1 to avoid division by zero.
     const monthsCount = Math.max(monthlySeries.length, 1);
 
     return {
@@ -114,30 +135,17 @@ export const calculateFinancialSummary = (
         totalTaxes,
         netProfit,
         monthlySeries,
-        detailedMovements: filtered,
+        detailedMovements: movements, // These are already filtered
         avgIncome: totalIncome / monthsCount,
         avgExpenses: totalExpenses / monthsCount,
         avgProfit: netProfit / monthsCount
     };
 };
 
-export const getPeriodDates = (preset: 'all' | 'month' | 'year' | 'custom', customStart?: string, customEnd?: string): { start: string | undefined, end: string | undefined } => {
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
-
-    switch (preset) {
-        case 'month': {
-            const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-            return { start, end: today };
-        }
-        case 'year': {
-            const start = new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0];
-            return { start, end: today };
-        }
-        case 'custom':
-            return { start: customStart, end: customEnd };
-        case 'all':
-        default:
-            return { start: undefined, end: undefined };
-    }
-};
+export function buildFinancialSummary(
+    movements: NormalizedMovement[],
+    filter: PeriodFilter
+): FinancialSummaryState {
+    const filtered = filterMovementsByPeriod(movements, filter);
+    return calculateFinancialSummary(filtered);
+}

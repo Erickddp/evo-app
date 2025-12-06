@@ -1,15 +1,27 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { DollarSign, Plus, Trash2, Download, Search } from 'lucide-react';
+import { DollarSign, Plus, Trash2, Download, Search, Filter, X } from 'lucide-react';
 import type { ToolDefinition } from '../shared/types';
 import { type EvoTransaction, createEvoTransaction, calculateTotals } from '../../core/domain/evo-transaction';
-// TODO: Refactor to use 'RegistroFinanciero' from src/core/evoappDataModel.ts in Phase 2
-
-import { parseIngresosCsv, loadMovementsFromStore, saveSnapshot } from './utils';
-import { useIncomeAnalytics } from './useIncomeAnalytics';
+import { parseIngresosCsv, loadMovementsFromStore, saveSnapshot, getYear } from './utils';
 import { AnalyticsPanel } from './AnalyticsPanel';
 
-// --- Helper Functions ---
+// --- Constants ---
+const MONTHS = [
+    { value: 1, label: 'Enero' },
+    { value: 2, label: 'Febrero' },
+    { value: 3, label: 'Marzo' },
+    { value: 4, label: 'Abril' },
+    { value: 5, label: 'Mayo' },
+    { value: 6, label: 'Junio' },
+    { value: 7, label: 'Julio' },
+    { value: 8, label: 'Agosto' },
+    { value: 9, label: 'Septiembre' },
+    { value: 10, label: 'Octubre' },
+    { value: 11, label: 'Noviembre' },
+    { value: 12, label: 'Diciembre' }
+];
 
+// --- Helper Functions ---
 function todayAsIso(): string {
     return new Date().toISOString().split('T')[0];
 }
@@ -19,25 +31,24 @@ function formatCurrency(amount: number): string {
 }
 
 // --- Component ---
-
 export const IngresosManagerTool: React.FC = () => {
+    // Data State
+    const [movements, setMovements] = useState<EvoTransaction[]>([]);
+    const [isLoaded, setIsLoaded] = useState(false);
+
+    // Form State
     const [date, setDate] = useState<string>(todayAsIso());
     const [concept, setConcept] = useState('');
     const [amountStr, setAmountStr] = useState<string>('');
     const [type, setType] = useState<EvoTransaction['type']>('gasto');
-    const [movements, setMovements] = useState<EvoTransaction[]>([]);
-    const [isLoaded, setIsLoaded] = useState(false);
-    const [filterText, setFilterText] = useState('');
 
-    // Analytics Hook
-    const {
-        view,
-        setView,
-        selectedYear,
-        setSelectedYear,
-        filteredMovements: timeFilteredMovements,
-        availableYears
-    } = useIncomeAnalytics(movements);
+    // Filter Panel State
+    const [filterYear, setFilterYear] = useState<number | ''>('');
+    const [filterMonth, setFilterMonth] = useState<number | ''>('');
+    const [appliedFilter, setAppliedFilter] = useState<{ year: number; month: number } | null>(null);
+
+    // Global Search State
+    const [globalSearch, setGlobalSearch] = useState('');
 
     // Load initial data
     useEffect(() => {
@@ -47,16 +58,6 @@ export const IngresosManagerTool: React.FC = () => {
         });
     }, []);
 
-    // Apply text filter on top of time filter
-    const finalFilteredMovements = useMemo(() => {
-        return timeFilteredMovements.filter((m) =>
-            m.concept.toLowerCase().includes(filterText.toLowerCase())
-        );
-    }, [timeFilteredMovements, filterText]);
-
-    // Derived state for stats (based on current view)
-    const stats = useMemo(() => calculateTotals(finalFilteredMovements), [finalFilteredMovements]);
-
     // Persist whenever movements change (only after initial load)
     useEffect(() => {
         if (isLoaded) {
@@ -64,6 +65,47 @@ export const IngresosManagerTool: React.FC = () => {
         }
     }, [movements, isLoaded]);
 
+    // Available Years for Dropdown
+    const availableYears = useMemo(() => {
+        const years = new Set(movements.map(m => getYear(m.date)));
+        years.add(new Date().getFullYear());
+        return Array.from(years).sort((a, b) => b - a);
+    }, [movements]);
+
+    // Derived State: Filtered Movements
+    const finalFilteredMovements = useMemo(() => {
+        let result = movements;
+
+        // 1. Time Filter (Year/Month)
+        if (appliedFilter) {
+            result = result.filter(m => {
+                const d = new Date(m.date);
+                // getMonth() is 0-indexed, we want 1-indexed to match values
+                const mMonth = d.getMonth() + 1;
+                const mYear = d.getFullYear();
+                return mYear === appliedFilter.year && mMonth === appliedFilter.month;
+            });
+        }
+
+        // 2. Global Search (Date, Concept, Amount, Type)
+        if (globalSearch.trim()) {
+            const lowerQuery = globalSearch.toLowerCase();
+            result = result.filter(m =>
+                m.date.includes(lowerQuery) ||
+                m.concept.toLowerCase().includes(lowerQuery) ||
+                m.amount.toString().includes(lowerQuery) ||
+                m.type.toLowerCase().includes(lowerQuery)
+            );
+        }
+
+        // Sort by Date Descending
+        return result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }, [movements, appliedFilter, globalSearch]);
+
+    // Stats based on filtered view
+    const stats = useMemo(() => calculateTotals(finalFilteredMovements), [finalFilteredMovements]);
+
+    // Handlers
     const handleAdd = (e?: React.FormEvent) => {
         e?.preventDefault();
         if (!concept.trim() || !amountStr) return;
@@ -89,7 +131,7 @@ export const IngresosManagerTool: React.FC = () => {
             setConcept('');
             setAmountStr('');
 
-            // Focus back on concept input for rapid entry
+            // Focus back on concept input
             const conceptInput = document.getElementById('concept-input');
             conceptInput?.focus();
         } catch (e) {
@@ -101,6 +143,21 @@ export const IngresosManagerTool: React.FC = () => {
         setMovements((prev) => prev.filter((m) => m.id !== id));
     };
 
+    const handleApplyFilters = () => {
+        if (filterYear !== '' && filterMonth !== '') {
+            setAppliedFilter({ year: Number(filterYear), month: Number(filterMonth) });
+        } else {
+            alert('Por favor selecciona Año y Mes para filtrar.');
+        }
+    };
+
+    const handleClearFilters = () => {
+        setFilterYear('');
+        setFilterMonth('');
+        setAppliedFilter(null);
+    };
+
+    // CSV Handlers
     const handleExportCsv = () => {
         const header = 'Fecha,Concepto,Ingreso,Gasto';
         let csvContent = header;
@@ -124,11 +181,10 @@ export const IngresosManagerTool: React.FC = () => {
 
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
-
         const link = document.createElement('a');
         link.href = url;
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        link.download = `evorix-movimientos-${view}-${timestamp}.csv`;
+        link.download = `evorix-movimientos-${timestamp}.csv`;
         link.click();
         URL.revokeObjectURL(url);
     };
@@ -155,34 +211,20 @@ export const IngresosManagerTool: React.FC = () => {
 
             try {
                 const result = parseIngresosCsv(text);
-
                 if (result.movements.length === 0 && result.stats.totalRows > 0) {
-                    alert(`No se importaron movimientos. 
-Total filas: ${result.stats.totalRows}
-Ignoradas: ${result.stats.ignored}
-Errores: ${result.stats.errors}`);
+                    alert(`No se importaron movimientos.\nTotal filas: ${result.stats.totalRows}\nIgnoradas: ${result.stats.ignored}\nErrores: ${result.stats.errors}`);
                 } else if (result.movements.length === 0) {
                     alert('El archivo parece estar vacío o no tiene formato válido.');
-                    return;
                 } else {
                     setMovements(prev => [...prev, ...result.movements]);
-
                     let msg = `Se importaron ${result.stats.imported} de ${result.stats.totalRows} filas.`;
-                    if (result.stats.ignored > 0) msg += `\n${result.stats.ignored} filas ignoradas (sin importe).`;
+                    if (result.stats.ignored > 0) msg += `\n${result.stats.ignored} filas ignoradas.`;
                     if (result.stats.errors > 0) msg += `\n${result.stats.errors} filas con error.`;
-
                     alert(msg);
                 }
-
-                if (result.stats.errors > 0) {
-                    console.warn('Detalle de errores de importación:', result.stats.errorDetails);
-                }
-
             } catch (e: any) {
                 alert(e.message || 'Error al importar CSV');
             }
-
-            // Reset file input
             e.target.value = '';
         };
         reader.readAsText(file);
@@ -193,8 +235,8 @@ Errores: ${result.stats.errors}`);
             {/* Header & Stats */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="md:col-span-1">
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">Movements Manager</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Track income and expenses.</p>
+                    <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">Gestor de Ingresos</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Control de gastos e ingresos.</p>
                 </div>
                 <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg border border-green-100 dark:border-green-800">
                     <div className="text-xs text-green-600 dark:text-green-400 font-medium uppercase">Total Ingresos</div>
@@ -212,176 +254,184 @@ Errores: ${result.stats.errors}`);
                 </div>
             </div>
 
-            {/* Analytics Panel */}
+            {/* Analytics - Showing context based on selection or default */}
             <AnalyticsPanel
                 movements={movements}
-                currentView={view}
-                selectedYear={selectedYear}
+                currentView={appliedFilter ? 'year' : 'historic'}
+                selectedYear={appliedFilter ? appliedFilter.year : new Date().getFullYear()}
             />
 
-            {/* View Controls */}
-            <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 dark:border-gray-700 pb-4">
-                <button
-                    onClick={() => setView('current-month')}
-                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'current-month'
-                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
-                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                        }`}
-                >
-                    Mes Actual
-                </button>
-                <button
-                    onClick={() => setView('prev-month')}
-                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'prev-month'
-                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
-                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                        }`}
-                >
-                    Mes Anterior
-                </button>
-                <button
-                    onClick={() => setView('last-3-months')}
-                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'last-3-months'
-                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
-                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                        }`}
-                >
-                    Últimos 3 Meses
-                </button>
-                <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => setView('year')}
-                        className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'year'
-                            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
-                            : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                            }`}
-                    >
-                        Por Año
-                    </button>
-                    {view === 'year' && (
-                        <select
-                            value={selectedYear}
-                            onChange={(e) => setSelectedYear(Number(e.target.value))}
-                            className="text-sm border-gray-300 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white py-1"
+            {/* Layout: Form + Filter Split */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                {/* Left: Manual Form */}
+                <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 border-b border-gray-100 dark:border-gray-700 pb-2">
+                        Nuevo Movimiento
+                    </h4>
+                    <form onSubmit={handleAdd} className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Fecha</label>
+                                <input
+                                    type="date"
+                                    value={date}
+                                    onChange={(e) => setDate(e.target.value)}
+                                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Tipo</label>
+                                <select
+                                    value={type}
+                                    onChange={(e) => setType(e.target.value as 'ingreso' | 'gasto')}
+                                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
+                                >
+                                    <option value="gasto">Gasto</option>
+                                    <option value="ingreso">Ingreso</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Concepto</label>
+                            <input
+                                id="concept-input"
+                                type="text"
+                                value={concept}
+                                onChange={(e) => setConcept(e.target.value)}
+                                className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
+                                placeholder="Descripción..."
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Monto</label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                value={amountStr}
+                                onChange={(e) => setAmountStr(e.target.value)}
+                                className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
+                                placeholder="0.00"
+                                required
+                            />
+                        </div>
+                        <button
+                            type="submit"
+                            className="w-full px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 text-sm font-medium mt-2"
                         >
-                            {availableYears.map(y => (
-                                <option key={y} value={y}>{y}</option>
-                            ))}
-                        </select>
-                    )}
+                            <Plus size={16} /> Agregar
+                        </button>
+                    </form>
                 </div>
-                <button
-                    onClick={() => setView('historic')}
-                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === 'historic'
-                        ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300'
-                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                        }`}
-                >
-                    Histórico
-                </button>
+
+                {/* Right: Search/Filter Panel */}
+                <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col justify-center">
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 border-b border-gray-100 dark:border-gray-700 pb-2">
+                        Buscar movimientos
+                    </h4>
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Año</label>
+                                <select
+                                    value={filterYear}
+                                    onChange={(e) => setFilterYear(e.target.value ? Number(e.target.value) : '')}
+                                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
+                                >
+                                    <option value="">Seleccionar año</option>
+                                    {availableYears.map(y => (
+                                        <option key={y} value={y}>{y}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Mes</label>
+                                <select
+                                    value={filterMonth}
+                                    onChange={(e) => setFilterMonth(e.target.value ? Number(e.target.value) : '')}
+                                    disabled={!filterYear}
+                                    className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2 disabled:opacity-50"
+                                >
+                                    <option value="">Seleccionar mes</option>
+                                    {MONTHS.map(m => (
+                                        <option key={m.value} value={m.value}>{m.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={handleApplyFilters}
+                                className="flex-1 px-4 py-2 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors text-sm font-medium flex items-center justify-center gap-2"
+                            >
+                                <Filter size={16} /> Aplicar filtros
+                            </button>
+                            {appliedFilter && (
+                                <button
+                                    onClick={handleClearFilters}
+                                    className="px-4 py-2 bg-gray-50 text-gray-600 dark:bg-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 rounded-md hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors text-sm font-medium"
+                                    title="Limpiar filtros"
+                                >
+                                    <X size={16} />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            {/* Input Form */}
-            <form onSubmit={handleAdd} className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col md:flex-row gap-4 items-end">
-                <div className="w-full md:w-32">
-                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Date</label>
-                    <input
-                        type="date"
-                        value={date}
-                        onChange={(e) => setDate(e.target.value)}
-                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
-                        required
-                    />
+            {/* Global Search Bar */}
+            <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Search size={16} className="text-gray-400" />
                 </div>
-                <div className="flex-1 w-full">
-                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Concept</label>
-                    <input
-                        id="concept-input"
-                        type="text"
-                        value={concept}
-                        onChange={(e) => setConcept(e.target.value)}
-                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
-                        placeholder="Description..."
-                        required
-                    />
-                </div>
-                <div className="w-full md:w-32">
-                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Type</label>
-                    <select
-                        value={type}
-                        onChange={(e) => setType(e.target.value as 'ingreso' | 'gasto')}
-                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
-                    >
-                        <option value="gasto">Gasto</option>
-                        <option value="ingreso">Ingreso</option>
-                    </select>
-                </div>
-                <div className="w-full md:w-32">
-                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Amount</label>
-                    <input
-                        type="number"
-                        step="0.01"
-                        min="0.01"
-                        value={amountStr}
-                        onChange={(e) => setAmountStr(e.target.value)}
-                        className="w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
-                        placeholder="0.00"
-                        required
-                    />
-                </div>
-                <button
-                    type="submit"
-                    className="w-full md:w-auto px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
-                >
-                    <Plus size={16} /> Add
-                </button>
-            </form>
+                <input
+                    type="text"
+                    value={globalSearch}
+                    onChange={(e) => setGlobalSearch(e.target.value)}
+                    className="pl-10 w-full rounded-lg border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-800 dark:border-gray-700 dark:text-white py-3 text-base"
+                    placeholder="Buscar por fecha, concepto, monto o tipo..."
+                />
+            </div>
 
-            {/* Filter & Export */}
-            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="relative w-full md:w-64">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Search size={14} className="text-gray-400" />
+            {/* CSV Buttons - Prominent Row */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <button
+                    onClick={handleDownloadTemplate}
+                    className="flex flex-col md:flex-row items-center justify-center gap-2 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all shadow-sm group"
+                >
+                    <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full group-hover:bg-gray-200 dark:group-hover:bg-gray-600">
+                        <Download size={20} className="text-gray-600 dark:text-gray-300" />
                     </div>
-                    <input
-                        type="text"
-                        value={filterText}
-                        onChange={(e) => setFilterText(e.target.value)}
-                        className="pl-9 w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm p-2"
-                        placeholder="Filtrar por concepto..."
-                    />
-                </div>
-                <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
-                    <span className="text-xs text-gray-400 hidden lg:inline-block mr-2" title="El CSV debe tener columnas: Fecha, Concepto, Ingreso, Gasto">
-                        Formato: Fecha, Concepto, Ingreso, Gasto
-                    </span>
-                    <button
-                        onClick={handleDownloadTemplate}
-                        className="w-full md:w-auto px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center justify-center gap-2 text-sm"
-                        title="Descargar plantilla vacía"
-                    >
-                        <Download size={14} /> Plantilla
-                    </button>
+                    <span className="font-medium text-gray-700 dark:text-gray-200">Plantilla</span>
+                </button>
+
+                <label className="flex flex-col md:flex-row items-center justify-center gap-2 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all shadow-sm cursor-pointer group">
                     <input
                         type="file"
                         accept=".csv"
-                        id="csv-upload-input"
-                        style={{ display: 'none' }}
+                        className="hidden"
                         onChange={handleImportCsv}
                     />
-                    <button
-                        onClick={() => document.getElementById('csv-upload-input')?.click()}
-                        className="w-full md:w-auto px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center justify-center gap-2 text-sm"
-                    >
-                        <Download size={14} className="rotate-180" /> Importar CSV
-                    </button>
-                    <button
-                        onClick={handleExportCsv}
-                        className="w-full md:w-auto px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 text-sm"
-                    >
-                        <Download size={14} /> Exportar CSV
-                    </button>
-                </div>
+                    <div className="p-2 bg-indigo-50 dark:bg-indigo-900/30 rounded-full group-hover:bg-indigo-100 dark:group-hover:bg-indigo-900/50">
+                        <Download size={20} className="rotate-180 text-indigo-600 dark:text-indigo-400" />
+                    </div>
+                    <span className="font-medium text-gray-700 dark:text-gray-200">Importar CSV</span>
+                </label>
+
+                <button
+                    onClick={handleExportCsv}
+                    disabled={finalFilteredMovements.length === 0}
+                    className="flex flex-col md:flex-row items-center justify-center gap-2 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed group"
+                >
+                    <div className="p-2 bg-green-50 dark:bg-green-900/30 rounded-full group-hover:bg-green-100 dark:group-hover:bg-green-900/50">
+                        <Download size={20} className="text-green-600 dark:text-green-400" />
+                    </div>
+                    <span className="font-medium text-gray-700 dark:text-gray-200">Exportar CSV</span>
+                </button>
             </div>
 
             {/* Table */}
@@ -401,7 +451,7 @@ Errores: ${result.stats.errors}`);
                             {finalFilteredMovements.length === 0 ? (
                                 <tr>
                                     <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-                                        No movements found.
+                                        No se encontraron movimientos.
                                     </td>
                                 </tr>
                             ) : (
@@ -446,7 +496,7 @@ export const ingresosManagerDefinition: ToolDefinition = {
         name: 'Gestor de Ingresos',
         description: 'Track and manage your income sources.',
         icon: DollarSign,
-        version: '0.5.0',
+        version: '0.6.0',
     },
     component: IngresosManagerTool,
 };
