@@ -33,6 +33,125 @@ export type FacturaCsvRowV2 = {
     correoOContacto?: string;
 };
 
+// Header normalization helper - tolerant of accents, punctuation, case
+export function normalizeHeader(raw: string): string {
+    return raw
+        .trim()
+        .toLowerCase()
+        // replace accented vowels
+        .replace(/[áÁ]/g, "a")
+        .replace(/[éÉ]/g, "e")
+        .replace(/[íÍ]/g, "i")
+        .replace(/[óÓ]/g, "o")
+        .replace(/[úÚüÜ]/g, "u")
+        // remove punctuation
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+export type V2CanonicalField =
+    | "fecha"
+    | "numeroFactura"
+    | "nombre"
+    | "rfc"
+    | "monto"
+    | "fechaPago"
+    | "cp"
+    | "direccion"
+    | "metodoPago"
+    | "formaPago"
+    | "descripcion"
+    | "regimenFiscal"
+    | "correoContacto";
+
+interface V2HeaderSynonyms {
+    [field: string]: string[];
+}
+
+export const V2_HEADER_SYNONYMS: V2HeaderSynonyms = {
+    fecha: ["fecha", "fecha emision", "fecha de emision"],
+    numeroFactura: ["numero de factura", "numero de", "num de factura", "folio", "factura"],
+    nombre: ["nombre", "nombre / razon social", "razon social", "cliente"],
+    rfc: ["rfc"],
+    monto: ["monto", "importe", "total", "monto total"],
+    fechaPago: ["fecha de pago", "fecha pago"],
+    cp: ["cp", "codigo postal", "c p"],
+    direccion: ["direccion", "domicilio"],
+    metodoPago: ["metodo de pago", "metodo pago"],
+    formaPago: ["forma de pago", "forma pago"],
+    descripcion: ["descripcion", "concepto", "detalle"],
+    regimenFiscal: ["regimen fiscal", "regimen"],
+    correoContacto: ["correo o contacto", "correo", "email", "correo electronico", "contacto"],
+};
+
+export interface V2HeaderMap {
+    fecha?: number;
+    numeroFactura?: number;
+    nombre?: number;
+    rfc?: number;
+    monto?: number;
+    fechaPago?: number;
+    cp?: number;
+    direccion?: number;
+    metodoPago?: number;
+    formaPago?: number;
+    descripcion?: number;
+    regimenFiscal?: number;
+    correoContacto?: number;
+}
+
+export function buildV2HeaderMap(rawHeaders: string[]): V2HeaderMap | null {
+    const normalizedHeaders = rawHeaders.map(normalizeHeader);
+    const map: V2HeaderMap = {};
+
+    function matchField(field: V2CanonicalField) {
+        const targets = V2_HEADER_SYNONYMS[field].map(normalizeHeader);
+        const index = normalizedHeaders.findIndex((h) =>
+            targets.some((t) =>
+                // tolerate truncated headers: header starts with synonym OR synonym starts with header
+                h.startsWith(t) || t.startsWith(h)
+            )
+        );
+        return index >= 0 ? index : undefined;
+    }
+
+    map.fecha = matchField("fecha");
+    map.numeroFactura = matchField("numeroFactura");
+    map.nombre = matchField("nombre");
+    map.rfc = matchField("rfc");
+    map.monto = matchField("monto");
+    map.fechaPago = matchField("fechaPago");
+    map.cp = matchField("cp");
+    map.direccion = matchField("direccion");
+    map.metodoPago = matchField("metodoPago");
+    map.formaPago = matchField("formaPago");
+    map.descripcion = matchField("descripcion");
+    map.regimenFiscal = matchField("regimenFiscal");
+    map.correoContacto = matchField("correoContacto");
+
+    // REQUIRED core fields for V2 to be considered valid
+    const required = [
+        map.fecha,
+        map.numeroFactura,
+        // map.nombre, // Relaxing strictness - maybe just first 2 + monto?
+        // map.rfc,
+        map.monto,
+    ];
+
+    const hasAllRequired = required.every((idx) => typeof idx === "number");
+
+    if (!hasAllRequired) {
+        return null; // Header matching failed for critical fields
+    }
+
+    return map;
+}
+
+/* 
+   Previous helpers below preserved
+*/
+
 // Pure mapping helper: Invoice + Client -> CSV Row
 export function mapInvoiceToCsvRowV2(invoice: Invoice, client: Cliente | undefined): FacturaCsvRowV2 {
     // Format date YYYY-MM-DD

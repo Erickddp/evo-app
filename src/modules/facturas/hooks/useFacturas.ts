@@ -334,6 +334,7 @@ export function useFacturas() {
         reason: SkipReason;
         message: string;
         rawRow: string;
+        details?: Record<string, any>;
     }
 
     const importCSV = async (file: File): Promise<{
@@ -410,37 +411,61 @@ export function useFacturas() {
                 };
 
                 // --- V2 HELPERS ---
-                const cleanHeader = (h: string) => h.trim().toLowerCase();
-
-                // Map of Internal Field Key -> List of possible CSV headers
-                const V2_HEADER_MAPPING: Record<keyof FacturaCsvRowV2, string[]> = {
-                    fecha: ['fecha', 'fecha de emision', 'fecha emision'],
-                    numeroFactura: ['numero de factura', 'numero de', 'num de factura', 'folio', 'factura'],
-                    nombre: ['nombre', 'cliente', 'razon social'],
-                    rfc: ['rfc'],
-                    monto: ['monto', 'total', 'importe'],
-                    fechaPago: ['fecha de pago', 'fecha pago', 'fecha p'],
-                    cp: ['cp', 'codigo postal', 'c.p.'],
-                    direccion: ['direccion', 'domicilio'],
-                    metodoPago: ['metodo de pago', 'metodo de p', 'metodo pago'],
-                    formaPago: ['forma de pago', 'forma de p', 'forma pago'],
-                    descripcion: ['descripcion', 'concepto'],
-                    regimenFiscal: ['regimen fiscal', 'regimen fis'],
-                    correoOContacto: ['correo o contacto', 'correo o contac', 'correo', 'contacto', 'email']
+                // We use a robust normalizer and synonym map to detect columns
+                const normalizeHeader = (raw: string): string => {
+                    return raw
+                        .trim()
+                        .toLowerCase()
+                        .replace(/[áÁ]/g, "a")
+                        .replace(/[éÉ]/g, "e")
+                        .replace(/[íÍ]/g, "i")
+                        .replace(/[óÓ]/g, "o")
+                        .replace(/[úÚüÜ]/g, "u")
+                        .replace(/[^a-z0-9]+/g, " ")
+                        .replace(/\s+/g, " ")
+                        .trim();
                 };
 
-                // Helper to find column index for a field
-                const findColumnIndex = (fileHeaders: string[], fieldKey: keyof FacturaCsvRowV2): number => {
-                    return fileHeaders.findIndex(header => {
-                        const h = cleanHeader(header);
-                        const candidates = V2_HEADER_MAPPING[fieldKey];
-                        if (candidates.includes(h)) return true;
-                        // Fuzzy prefix match (N chars)
-                        return candidates.some(c => {
-                            if (h.length >= 5 && c.startsWith(h)) return true;
-                            return false;
-                        });
+                const V2_HEADER_SYNONYMS: Record<string, string[]> = {
+                    fecha: ["fecha", "fecha emision", "fecha de emision"],
+                    numeroFactura: ["numero de factura", "numero de", "num de factura", "folio", "factura"],
+                    nombre: ["nombre", "nombre / razon social", "razon social", "cliente"],
+                    rfc: ["rfc"],
+                    monto: ["monto", "importe", "total", "monto total"],
+                    fechaPago: ["fecha de pago", "fecha pago"],
+                    cp: ["cp", "codigo postal", "c p"],
+                    direccion: ["direccion", "domicilio"],
+                    metodoPago: ["metodo de pago", "metodo pago"],
+                    formaPago: ["forma de pago", "forma pago"],
+                    descripcion: ["descripcion", "concepto", "detalle"],
+                    regimenFiscal: ["regimen fiscal", "regimen"],
+                    correoContacto: ["correo o contacto", "correo", "email", "correo electronico", "contacto"],
+                };
+
+                // Helper to build map
+                const buildV2HeaderMap = (rawHeaders: string[]): Record<string, number> | null => {
+                    const normalizedHeaders = rawHeaders.map(normalizeHeader);
+                    const map: Record<string, number> = {};
+
+                    const matchField = (field: string) => {
+                        const targets = V2_HEADER_SYNONYMS[field].map(normalizeHeader);
+                        const index = normalizedHeaders.findIndex((h) =>
+                            targets.some((t) => h.startsWith(t) || t.startsWith(h))
+                        );
+                        return index >= 0 ? index : undefined;
+                    };
+
+                    const fields = Object.keys(V2_HEADER_SYNONYMS);
+                    fields.forEach(f => {
+                        const idx = matchField(f);
+                        if (idx !== undefined) map[f] = idx;
                     });
+
+                    // Required fields check: Date, Number, Amount are critical
+                    const required = ['fecha', 'numeroFactura', 'monto'];
+                    const hasAllRequired = required.every(f => map[f] !== undefined);
+
+                    return hasAllRequired ? map : null;
                 };
 
                 const parseMonto = (raw: string | number | null | undefined): number | null => {
@@ -472,40 +497,33 @@ export function useFacturas() {
 
                 // Detect V2
                 const fileHeaders = splitCSV(lines[0], delimiter);
-                const fechaIdx = findColumnIndex(fileHeaders, 'fecha');
-                const adminIdx = findColumnIndex(fileHeaders, 'numeroFactura');
-                const amountIdx = findColumnIndex(fileHeaders, 'monto');
-
-                const isV2 = fechaIdx !== -1 && adminIdx !== -1 && amountIdx !== -1;
+                const headerMap = buildV2HeaderMap(fileHeaders);
+                const isV2 = headerMap !== null;
 
                 let imported = 0;
                 let skipped = 0;
                 const errors: string[] = [];
                 // Helper to register skipped row
-                const registerSkip = (rowIndex: number, reason: SkipReason, message: string, rawRow: string) => {
+                const registerSkip = (rowIndex: number, reason: SkipReason, message: string, rawRow: string, details?: Record<string, any>) => {
                     skipped++;
                     skippedByReason[reason]++;
                     // Keep first 20 for debugging
                     if (skippedDetails.length < 20) {
-                        skippedDetails.push({ rowIndex, reason, message, rawRow });
+                        skippedDetails.push({ rowIndex, reason, message, rawRow, details });
                     }
                 };
 
-                if (isV2) {
+                if (isV2 && headerMap) {
                     // --- V2 LOGIC ---
-                    const colMap: Partial<Record<keyof FacturaCsvRowV2, number>> = {};
-                    (Object.keys(V2_HEADER_MAPPING) as Array<keyof FacturaCsvRowV2>).forEach(key => {
-                        const idx = findColumnIndex(fileHeaders, key);
-                        if (idx !== -1) colMap[key] = idx;
-                    });
+                    console.log("[Facturacion Import] V2 Detected with headers:", headerMap);
 
                     for (let i = 1; i < lines.length; i++) {
                         try {
                             const rawRowStr = lines[i];
                             const cols = splitCSV(rawRowStr, delimiter);
 
-                            const getRaw = (key: keyof FacturaCsvRowV2) => {
-                                const idx = colMap[key];
+                            const getRaw = (key: string) => {
+                                const idx = headerMap[key];
                                 if (idx === undefined || idx >= cols.length) return '';
                                 let val = cols[idx];
                                 if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1).replace(/""/g, '"');
@@ -521,18 +539,18 @@ export function useFacturas() {
 
                             // VALIDATION & LOGGING
                             if (!normalizedFecha) {
-                                registerSkip(i + 1, 'invalid_fecha', `Fecha inválida: '${rawFecha}'`, rawRowStr);
+                                registerSkip(i + 1, 'invalid_fecha', `Fecha inválida: '${rawFecha}'`, rawRowStr, { rawFecha });
                                 continue;
                             }
                             if (parsedMonto === null) {
-                                registerSkip(i + 1, 'invalid_monto', `Monto inválido: '${rawMonto}'`, rawRowStr);
+                                registerSkip(i + 1, 'invalid_monto', `Monto inválido: '${rawMonto}'`, rawRowStr, { rawMonto });
                                 continue;
                             }
 
                             const finalFolio = rawFolio || 'S/NUM';
 
                             if (invoices.some(inv => inv.folio === finalFolio)) {
-                                registerSkip(i + 1, 'duplicate_folio', `Folio duplicado: '${finalFolio}'`, rawRowStr);
+                                registerSkip(i + 1, 'duplicate_folio', `Folio duplicado: '${finalFolio}'`, rawRowStr, { folio: finalFolio });
                                 continue;
                             }
 
@@ -549,7 +567,7 @@ export function useFacturas() {
                                 formaPago: getRaw('formaPago') || undefined,
                                 descripcion: getRaw('descripcion') || undefined,
                                 regimenFiscal: getRaw('regimenFiscal') || undefined,
-                                correoOContacto: getRaw('correoOContacto') || undefined
+                                correoOContacto: getRaw('correoContacto') || undefined
                             };
 
                             const { invoice, client } = mapCsvRowV2ToInvoice(rowData);
@@ -568,7 +586,7 @@ export function useFacturas() {
 
                         } catch (err) {
                             errors.push(`V2 Import Error línea ${i + 1}: ${err}`);
-                            registerSkip(i + 1, 'other', `Error desconocido: ${err}`, lines[i]);
+                            registerSkip(i + 1, 'other', `Error desconocido: ${err}`, lines[i], { error: String(err) });
                         }
                     }
 
@@ -670,8 +688,9 @@ export function useFacturas() {
                     }
                 }
 
-                if (skippedDetails.length > 0) {
-                    console.warn("[Facturacion Import] Skipped rows details:", skippedDetails);
+                if (skipped > 0) {
+                    console.warn("[Facturacion V2 Import] Skipped counts by reason:", skippedByReason);
+                    console.warn("[Facturacion V2 Import] First skipped rows (up to 20):", skippedDetails);
                 }
 
                 resolve({ imported, skipped, errors, skippedByReason, skippedDetails });
