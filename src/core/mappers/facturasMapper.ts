@@ -50,7 +50,11 @@ export const facturasMapper = {
             tipoComprobante: 'I', // Default to Ingreso
             estado: inv.paid ? 'pagada' : 'pendiente',
             pagada: inv.paid,
-            fechaPago: inv.paymentDate
+            fechaPago: inv.paymentDate,
+            formaPago: inv.paymentForm,
+            metodoPago: inv.paymentMethod,
+            usoCfdi: inv.cfdiUse,
+            notas: inv.notes
         };
     },
 
@@ -64,9 +68,10 @@ export const facturasMapper = {
             concept: f.concepto,
             amount: f.total,
             status: f.estado === 'pagada' ? 'Paid' : 'Pending',
-            paymentForm: '99', // Default
-            paymentMethod: 'PUE', // Default
-            cfdiUse: 'G03', // Default
+            paymentForm: f.formaPago || '99',
+            paymentMethod: f.metodoPago || 'PUE',
+            cfdiUse: f.usoCfdi || 'G03',
+            notes: f.notas,
             month: f.fechaEmision.substring(0, 7),
             paid: f.pagada,
             realized: true,

@@ -10,6 +10,7 @@ import {
     Legend
 } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
+import { WidgetSkeleton, WidgetCard } from './WidgetCommon';
 
 ChartJS.register(
     CategoryScale,
@@ -25,17 +26,12 @@ export function TaxOverviewWidget() {
 
     const formatCurrency = (val: number) => val.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
-    if (loading) {
-        return (
-            <div className="h-full rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800 animate-pulse">
-                <div className="h-6 w-1/3 bg-gray-200 dark:bg-gray-700 rounded mb-4"></div>
-                <div className="space-y-4">
-                    <div className="h-20 bg-gray-100 dark:bg-gray-800 rounded"></div>
-                    <div className="h-20 bg-gray-100 dark:bg-gray-800 rounded"></div>
-                </div>
-            </div>
-        );
-    }
+    if (loading) return <WidgetSkeleton />;
+
+    // Check if error handling is needed - assuming hook might return zeros/empty if error or just successful empty
+    // We can assume if totalYear is 0 and lastPayment is null, likely empty.
+
+    const isEmpty = totalYear === 0 && !lastPayment && monthlySummary.every(m => m.total === 0);
 
     const labels = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
 
@@ -122,52 +118,60 @@ export function TaxOverviewWidget() {
     };
 
     return (
-        <div className="group h-full rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-all hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
-            <div className="flex items-center gap-3 mb-6">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400">
-                    <FileText className="h-5 w-5" />
+        <WidgetCard>
+            <div className="flex flex-col h-full">
+                <div className="flex items-center gap-3 mb-6">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400">
+                        <FileText className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-medium text-gray-900 dark:text-white">Resumen de Impuestos</h3>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Basado en el módulo Tax Tracker.</p>
+                    </div>
                 </div>
-                <div>
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-white">Resumen de impuestos</h3>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Basado en el módulo Tax Tracker.</p>
-                </div>
+
+                {isEmpty ? (
+                    <div className="text-center py-8">
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Sin pagos de impuestos registrados para este año.</p>
+                    </div>
+                ) : (
+                    <div className="space-y-6 flex-1 flex flex-col">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            {/* TOTAL AÑO ACTUAL */}
+                            <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700">
+                                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Total año actual</p>
+                                <p className="text-xl font-bold text-gray-900 dark:text-white">{formatCurrency(totalYear)}</p>
+                            </div>
+
+                            {/* IVA (AÑO) */}
+                            <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700">
+                                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">IVA (Año)</p>
+                                <p className="text-xl font-bold text-blue-600 dark:text-blue-400">{formatCurrency(totalIVA)}</p>
+                            </div>
+
+                            {/* ÚLTIMO PAGO */}
+                            <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700">
+                                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Último pago</p>
+                                {lastPayment ? (
+                                    <>
+                                        <p className="text-xl font-bold text-gray-900 dark:text-white">{formatCurrency(lastPayment.amount)}</p>
+                                        <p className="text-xs text-gray-400 mt-1 truncate">
+                                            {lastPayment.type} · {new Date(lastPayment.date).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit' })}
+                                        </p>
+                                    </>
+                                ) : (
+                                    <p className="text-xl font-bold text-gray-900 dark:text-white">-</p>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Chart */}
+                        <div className="flex-1 min-h-[200px] w-full mt-4">
+                            <Bar options={options} data={data} />
+                        </div>
+                    </div>
+                )}
             </div>
-
-            <div className="space-y-6">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    {/* TOTAL AÑO ACTUAL */}
-                    <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700">
-                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Total año actual</p>
-                        <p className="text-xl font-bold text-gray-900 dark:text-white">{formatCurrency(totalYear)}</p>
-                    </div>
-
-                    {/* ÚLTIMO PAGO */}
-                    <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700">
-                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Último pago</p>
-                        {lastPayment ? (
-                            <>
-                                <p className="text-xl font-bold text-gray-900 dark:text-white">{formatCurrency(lastPayment.amount)}</p>
-                                <p className="text-xs text-gray-400 mt-1">
-                                    {lastPayment.type} · {lastPayment.date}
-                                </p>
-                            </>
-                        ) : (
-                            <p className="text-xl font-bold text-gray-900 dark:text-white">-</p>
-                        )}
-                    </div>
-
-                    {/* IVA (AÑO) */}
-                    <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700">
-                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">IVA (Año)</p>
-                        <p className="text-xl font-bold text-blue-600 dark:text-blue-400">{formatCurrency(totalIVA)}</p>
-                    </div>
-                </div>
-
-                {/* Chart */}
-                <div className="h-64 w-full">
-                    <Bar options={options} data={data} />
-                </div>
-            </div>
-        </div>
+        </WidgetCard>
     );
 }

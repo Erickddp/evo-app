@@ -1,80 +1,199 @@
-import { useEffect, useState } from 'react';
-import { FileText } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { FileText, Calendar } from 'lucide-react';
 import { dataStore } from '../../data/dataStore';
+import { evoStore } from '../../evoappDataStore';
+import { WidgetSkeleton, WidgetError, WidgetCard } from './WidgetCommon';
 
-interface FacturasStats {
-    count: number;
-    amount: number;
-    pendingCount: number;
-    pendingAmount: number;
-}
+type Period = 'currentMonth' | 'last3Months' | 'currentYear';
 
 export function FacturasWidget() {
-    const [stats, setStats] = useState<FacturasStats | null>(null);
+    const [invoices, setInvoices] = useState<any[]>([]);
+    const [period, setPeriod] = useState<Period>('currentMonth');
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
 
     useEffect(() => {
         let isMounted = true;
         async function load() {
             try {
-                const records = await dataStore.listRecords<any>('facturas-manager');
-                if (!isMounted) return;
+                // Determine source: try canonical evoStore first, then legacy
+                let loadedInvoices: any[] = [];
+                const canonicalInvoices = await evoStore.facturas.getAll();
 
-                const currentMonth = new Date().toISOString().slice(0, 7);
-                const invoices = records
-                    .filter(r => r.payload.type === 'invoice')
-                    .map(r => r.payload.data);
+                if (canonicalInvoices.length > 0) {
+                    loadedInvoices = canonicalInvoices;
+                } else {
+                    const legacyRecords = await dataStore.listRecords<any>('facturas-manager');
+                    if (legacyRecords.length > 0) {
+                        loadedInvoices = legacyRecords
+                            .filter(r => r.payload.type === 'invoice')
+                            .map(r => r.payload.data)
+                            // Map legacy to generic structure if needed - key fields are date/fecha, amount/total, paid state
+                            .map(legacy => ({
+                                ...legacy,
+                                fechaEmision: legacy.date || legacy.createdAt, // Ensure date field availability
+                                total: Number(legacy.amount) || 0,
+                                pagada: !!legacy.paid
+                            }));
+                    }
+                }
 
-                const monthInvoices = invoices.filter((inv: any) => inv.month === currentMonth);
-
-                const count = monthInvoices.length;
-                const amount = monthInvoices.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
-                const pending = monthInvoices.filter((inv: any) => !inv.paid);
-                const pendingCount = pending.length;
-                const pendingAmount = pending.reduce((sum: number, inv: any) => sum + (Number(inv.amount) || 0), 0);
-
-                setStats({ count, amount, pendingCount, pendingAmount });
+                if (isMounted) {
+                    setInvoices(loadedInvoices);
+                    setLoading(false);
+                }
             } catch (e) {
                 console.error(e);
+                if (isMounted) {
+                    setError(true);
+                    setLoading(false);
+                }
             }
         }
         void load();
         return () => { isMounted = false; };
     }, []);
 
+    const stats = useMemo(() => {
+        if (invoices.length === 0) return null;
+
+        const now = new Date();
+        const currentMonthIso = now.toISOString().slice(0, 7); // YYYY-MM
+        const currentYearIso = now.getFullYear().toString();
+
+        // 1. Filter by period
+        let filtered = [];
+        if (period === 'currentMonth') {
+            filtered = invoices.filter(inv => (inv.fechaEmision || '').startsWith(currentMonthIso));
+        } else if (period === 'currentYear') {
+            filtered = invoices.filter(inv => (inv.fechaEmision || '').startsWith(currentYearIso));
+        } else if (period === 'last3Months') {
+            const months: string[] = [];
+            for (let i = 0; i < 3; i++) {
+                const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                months.push(d.toISOString().slice(0, 7));
+            }
+            filtered = invoices.filter(inv => {
+                const dateStr = inv.fechaEmision || '';
+                return months.some(m => dateStr.startsWith(m));
+            });
+        }
+
+        // Metrics for selected period
+        const facturasPeriodo = filtered.length;
+        const montoPeriodo = filtered.reduce((acc, inv) => acc + (Number(inv.total) || 0), 0);
+
+        const pendientes = filtered.filter(inv => !inv.pagada);
+        const pendientesCount = pendientes.length;
+        const pendientesTotal = pendientes.reduce((acc, inv) => acc + (Number(inv.total) || 0), 0);
+
+        // Optional: Mini summary for current month (always)
+        const currentMonthInvoices = invoices.filter(inv => (inv.fechaEmision || '').startsWith(currentMonthIso));
+        const currentMonthCount = currentMonthInvoices.length;
+        const currentMonthAmount = currentMonthInvoices.reduce((acc, inv) => acc + (Number(inv.total) || 0), 0);
+
+        return {
+            facturasPeriodo,
+            montoPeriodo,
+            pendientesCount,
+            pendientesTotal,
+            currentMonthCount,
+            currentMonthAmount,
+            hasData: invoices.length > 0
+        };
+    }, [invoices, period]);
+
     const formatCurrency = (val: number) => val.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
-    return (
-        <div className="group h-full rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-all hover:shadow-md dark:border-gray-700 dark:bg-gray-800">
-            <div className="flex items-center gap-3 mb-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400">
-                    <FileText className="h-5 w-5" />
+    if (loading) return <WidgetSkeleton />;
+    if (error) return <WidgetError message="No fue posible cargar el resumen de facturación." />;
+
+    if (!stats || !stats.hasData) {
+        return (
+            <WidgetCard>
+                <div className="flex items-center gap-3 mb-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400">
+                        <FileText className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h3 className="text-lg font-medium text-gray-900 dark:text-white">Facturación</h3>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Resumen del periodo.</p>
+                    </div>
                 </div>
-                <div>
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-white">Facturación</h3>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">Basado en el módulo Facturas.</p>
+                <div className="flex-1 flex items-center justify-center">
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Sin facturas registradas.</p>
+                </div>
+            </WidgetCard>
+        );
+    }
+
+    return (
+        <WidgetCard>
+            <div className="flex flex-col h-full bg-white dark:bg-transparent">
+                {/* Header */}
+                <div className="flex items-start justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400">
+                            <FileText className="h-5 w-5" />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-medium text-gray-900 dark:text-white">Facturación</h3>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                Global
+                            </p>
+                        </div>
+                    </div>
+                    <div className="relative">
+                        <select
+                            value={period}
+                            onChange={(e) => setPeriod(e.target.value as Period)}
+                            className="appearance-none bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-300 rounded-lg py-1 pl-2 pr-6 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                        >
+                            <option value="currentMonth">Este mes</option>
+                            <option value="last3Months">Últimos 3 meses</option>
+                            <option value="currentYear">Año actual</option>
+                        </select>
+                        <Calendar className="absolute right-2 top-1.5 h-3 w-3 text-gray-400 pointer-events-none" />
+                    </div>
+                </div>
+
+                {/* Body Blocks */}
+                <div className="grid grid-cols-2 gap-4 flex-1">
+                    {/* Facturación del Periodo */}
+                    <div className="p-4 rounded-xl bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700 flex flex-col justify-center">
+                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                            Facturas en el periodo
+                        </p>
+                        <p className="text-3xl font-bold text-gray-900 dark:text-white mb-1">
+                            {stats.facturasPeriodo}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                            Total: <span className="font-mono font-medium text-gray-700 dark:text-gray-300">{formatCurrency(stats.montoPeriodo)}</span>
+                        </p>
+                    </div>
+
+                    {/* Pendiente de Cobro */}
+                    <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-800 flex flex-col justify-center">
+                        <p className="text-xs font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-2">
+                            Pendiente de cobro
+                        </p>
+                        <p className="text-3xl font-bold text-amber-700 dark:text-amber-500 mb-1">
+                            {stats.pendientesCount}
+                        </p>
+                        <p className="text-xs text-amber-600/80 dark:text-amber-400/80 truncate">
+                            Total: <span className="font-mono font-medium">{formatCurrency(stats.pendientesTotal)}</span>
+                        </p>
+                    </div>
+                </div>
+
+                {/* Footer / Mini Summary */}
+                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 text-center">
+                    <p className="text-xs text-gray-400">
+                        Este mes: {stats.currentMonthCount} facturas, {formatCurrency(stats.currentMonthAmount)} facturado.
+                    </p>
                 </div>
             </div>
-
-            {!stats ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">No hay datos de facturación este mes.</p>
-            ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-700">
-                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Facturas este mes</p>
-                        <div className="flex items-baseline space-x-2">
-                            <span className="text-2xl font-bold text-gray-900 dark:text-white">{stats.count}</span>
-                            <span className="text-sm text-gray-500 dark:text-gray-400">· {formatCurrency(stats.amount)}</span>
-                        </div>
-                    </div>
-                    <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-800">
-                        <p className="text-xs font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wider mb-1">Pendientes de pago</p>
-                        <div className="flex items-baseline space-x-2">
-                            <span className="text-2xl font-bold text-amber-700 dark:text-amber-300">{stats.pendingCount}</span>
-                            <span className="text-sm text-amber-600 dark:text-amber-400">· {formatCurrency(stats.pendingAmount)}</span>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+        </WidgetCard>
     );
 }
+

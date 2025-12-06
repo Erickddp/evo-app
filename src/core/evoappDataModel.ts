@@ -82,6 +82,12 @@ export interface Factura {
     // Datos de control interno
     pagada: boolean;
     fechaPago?: string;
+
+    // Optional fields for CSV V2 / Facturación specifics
+    formaPago?: string;
+    metodoPago?: string;
+    usoCfdi?: string;
+    notas?: string;
 }
 
 // ==========================================

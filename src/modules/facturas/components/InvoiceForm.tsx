@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Trash2, ArrowLeft } from 'lucide-react';
 import type { Client, Invoice } from '../types';
 
 interface InvoiceFormProps {
@@ -6,10 +7,11 @@ interface InvoiceFormProps {
     clients: Client[];
     nextFolio: string;
     onCancel: () => void;
+    onDelete?: (id: string) => Promise<void>;
     initialData?: Invoice;
 }
 
-export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextFolio, onCancel, initialData }) => {
+export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextFolio, onCancel, onDelete, initialData }) => {
     const [rfcSearch, setRfcSearch] = useState(initialData?.rfc || '');
     const [clientNameSearch, setClientNameSearch] = useState(initialData?.clientName || '');
 
@@ -60,6 +62,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
             setFormData(prev => ({ ...prev, folio: nextFolio }));
         }
     }, [initialData, nextFolio, clients]);
+
+    // Handle ESC key to close
+    useEffect(() => {
+        const handleEsc = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                onCancel();
+            }
+        };
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    }, [onCancel]);
 
     const handleClientSearch = (val: string, type: 'rfc' | 'name') => {
         if (type === 'rfc') {
@@ -139,6 +152,18 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6 bg-slate-800 p-6 rounded-lg border border-slate-700">
+            {/* Top Bar: Close Button */}
+            <div className="flex items-center mb-2">
+                <button
+                    type="button"
+                    onClick={onCancel}
+                    className="flex items-center space-x-2 text-slate-300 hover:text-white px-3 py-1 rounded-md border border-slate-700 hover:border-slate-500 transition text-sm"
+                >
+                    <ArrowLeft size={16} />
+                    <span>Regresar</span>
+                </button>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Invoice Meta */}
                 <div>
@@ -346,20 +371,38 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
                 )}
             </div>
 
-            <div className="flex justify-end space-x-4 pt-4 border-t border-slate-700">
-                <button
-                    type="button"
-                    onClick={onCancel}
-                    className="px-4 py-2 text-slate-300 hover:text-white"
-                >
-                    Cancelar
-                </button>
-                <button
-                    type="submit"
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md"
-                >
-                    Guardar Factura
-                </button>
+            <div className="flex justify-between pt-4 border-t border-slate-700">
+                <div>
+                    {initialData?.id && onDelete && (
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                if (window.confirm(`¿Seguro que quieres eliminar la factura ${initialData.folio}? Esta acción no se puede deshacer.`)) {
+                                    await onDelete(initialData.id);
+                                }
+                            }}
+                            className="flex items-center space-x-2 px-4 py-2 text-rose-400 hover:text-rose-300 hover:bg-rose-900/20 rounded-md transition-colors"
+                        >
+                            <Trash2 size={18} />
+                            <span>Eliminar</span>
+                        </button>
+                    )}
+                </div>
+                <div className="flex space-x-4">
+                    <button
+                        type="button"
+                        onClick={onCancel}
+                        className="px-4 py-2 text-slate-300 hover:text-white"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        type="submit"
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md"
+                    >
+                        Guardar Factura
+                    </button>
+                </div>
             </div>
         </form>
     );
