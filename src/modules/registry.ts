@@ -7,6 +7,7 @@ import { taxTrackerDefinition } from './tax-tracker/meta';
 import { financialSummaryDefinition } from './financial-summary/meta';
 import { facturasDefinition } from './facturas/meta';
 import { taxCalculationDefinition } from './tax-calculation';
+import { evoLibraryDefinition } from './evo-library/meta';
 
 export const tools: Tool[] = [
     cfdiValidatorDefinition,
@@ -16,6 +17,7 @@ export const tools: Tool[] = [
     taxTrackerDefinition,
     taxCalculationDefinition,
     financialSummaryDefinition,
+    evoLibraryDefinition,
 ];
 
 export const toolsRegistry = tools;
