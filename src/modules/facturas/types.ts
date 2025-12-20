@@ -22,6 +22,8 @@ export interface Invoice {
     rfc: string; // RFC
     email?: string; // CORREO
     concept: string; // CONCEPTO
+    conceptoGeneral?: string; // Fallback alias
+    descripcion?: string; // Fallback alias
     amount: number; // MONTO
     status: string; // ESTADO
     paymentForm: string; // FORMA_PAGO

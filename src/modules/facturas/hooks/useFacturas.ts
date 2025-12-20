@@ -14,6 +14,7 @@ import {
     type V2CanonicalField
 } from '../csvSchemaV2';
 import { parseCsv, toCsvRow, normalizeDate, parseAmount } from '../utils/csvParser';
+import { calculateNextFolio, getSerieFromFolio, type FolioSerie } from '../utils/folioUtils';
 import { evoEvents } from '../../../core/events';
 
 const TOOL_ID = 'facturas-manager';
@@ -291,18 +292,6 @@ export function useFacturas() {
         }
     };
 
-    const getNextFolio = () => {
-        if (invoices.length === 0) return 'C100';
-
-        const numbers = invoices.map(inv => {
-            const match = inv.folio.match(/C(\d+)/);
-            return match ? parseInt(match[1], 10) : 0;
-        });
-
-        const max = Math.max(...numbers, 0);
-        return `C${max + 1}`;
-    };
-
     const exportCSV = () => {
         const headers = FACTURAS_CSV_HEADERS_V2;
 
@@ -364,8 +353,12 @@ export function useFacturas() {
         return new Promise((resolve) => {
             const reader = new FileReader();
             reader.onload = async (e) => {
+                console.time('import');
                 const text = e.target?.result as string;
-                if (!text) return;
+                if (!text) {
+                    console.timeEnd('import');
+                    return;
+                }
 
                 // 1. Parse with RFC4180 parser (handles quotes and newlines)
                 const { data, errors: parseErrors } = parseCsv(text);
@@ -392,6 +385,7 @@ export function useFacturas() {
                 };
 
                 if (data.length < 2) {
+                    console.timeEnd('import');
                     resolve({ imported: 0, skipped: 0, errors: ['Archivo vacío o sin datos'], skippedByReason, skippedDetails });
                     return;
                 }
@@ -400,17 +394,31 @@ export function useFacturas() {
                 const fileHeaders = data[0];
                 const { map: headerMap, missing } = buildV2HeaderMap(fileHeaders);
 
+                // --- DEBUG PRO (Part 1) ---
+                const rawHeadersArray = fileHeaders;
+                const normalizedHeadersArray = fileHeaders.map(h => h.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Z0-9]+/g, " ").trim()); // Manually replicate normalizeHeader logic for log clarity
+                console.log('[Import] rawHeaders:', rawHeadersArray);
+                console.log('[Import] normalizedHeaders:', normalizedHeadersArray);
+                console.log('[Import] headerMap:', headerMap);
+                console.log('[Import] firstRowRaw:', data[1]); // First data row
+                // --------------------------
+
                 // 3. Validate Mandatory Columns
                 if (missing.length > 0) {
                     const msg = `Faltan columnas obligatorias: ${missing.join(', ')}`;
                     errors.push(msg);
+                    console.timeEnd('import');
                     resolve({ imported: 0, skipped: 0, errors, skippedByReason, skippedDetails });
                     return;
                 }
 
                 console.log("[Facturacion Import] Headers detected:", headerMap);
 
-                // 4. Process Rows
+                // Collections for Batch Save
+                const newInvoices: Invoice[] = [];
+                const newClientsMap = new Map<string, Client>(); // Keyed by RFC to ensure unique per batch
+
+                // 4. Process Rows (Sync Loop)
                 for (let i = 1; i < data.length; i++) {
                     const row = data[i];
                     // Skip empty rows (already handled by parser, but double check)
@@ -441,13 +449,24 @@ export function useFacturas() {
                         }
 
                         const finalFolio = rawFolio ? rawFolio.trim() : 'S/NUM';
+
+                        // Check against existing invoices state
                         if (invoices.some(inv => inv.folio === finalFolio)) {
                             registerSkip(i + 1, 'duplicate_folio', `Folio duplicado: '${finalFolio}'`, row.join(','), { folio: finalFolio });
                             continue;
                         }
+                        // Check against batch duplicates
+                        if (newInvoices.some(inv => inv.folio === finalFolio)) {
+                            registerSkip(i + 1, 'duplicate_folio', `Folio duplicado en este archivo: '${finalFolio}'`, row.join(','), { folio: finalFolio });
+                            continue;
+                        }
 
                         const rawDescripcion = getRaw('descripcion');
-                        console.log('[Facturacion Import] descripcion:', rawDescripcion);
+                        if (!rawDescripcion?.trim()) {
+                            console.warn('[Import] descripcion vacia. headers:', rawHeadersArray, normalizedHeadersArray, headerMap);
+                            console.warn('[Import] firstRowRaw:', data[1]); // Or current row if we want, but user asked for context
+                        }
+                        const concepto = (rawDescripcion ?? '').trim();
 
                         // Map to Object
                         const rowData: FacturaCsvRowV2 = {
@@ -461,24 +480,30 @@ export function useFacturas() {
                             direccion: getRaw('direccion') || undefined,
                             metodoPago: getRaw('metodoPago') || undefined,
                             formaPago: getRaw('formaPago') || undefined,
-                            descripcion: rawDescripcion || undefined,
+                            descripcion: concepto || undefined,
+                            concepto: concepto || undefined,
+                            conceptoGeneral: concepto || undefined,
                             regimenFiscal: getRaw('regimenFiscal') || undefined,
                             correoOContacto: getRaw('correoContacto') || undefined
                         };
 
-                        // 5. Save Logic (Reused existing)
-                        const { invoice, client } = mapCsvRowV2ToInvoice(rowData);
-
-                        if (client.rfc) {
-                            const existingClient = clients.find(c => c.rfc === client.rfc);
-                            if (existingClient) {
-                                await saveClient({ ...existingClient, ...client, id: existingClient.id });
-                            } else {
-                                await saveClient(client);
-                            }
+                        if (imported === 0) {
+                            console.log('[Import] concepto mapped:', { rawDescripcion, conceptoGeneral: rowData.conceptoGeneral, concepto: rowData.concepto, descripcion: rowData.descripcion });
                         }
 
-                        await saveInvoice(invoice);
+                        // Transform to Domain Models
+                        const { invoice, client } = mapCsvRowV2ToInvoice(rowData);
+
+                        // Add to batch collections
+                        if (client.rfc) {
+                            // Only add if not already in clients standard list (unless we want to update?)
+                            // Current logic: Upsert.
+                            // We don't have access to deep store here, but we can verify against 'clients' state.
+                            // We'll collect all, then merge.
+                            newClientsMap.set(client.rfc, client);
+                        }
+
+                        newInvoices.push(invoice);
                         imported++;
 
                     } catch (err) {
@@ -487,10 +512,239 @@ export function useFacturas() {
                     }
                 }
 
+                // 5. Batch Save Phase (Perf Optimization)
+                if (newInvoices.length > 0) {
+                    // 5a. Save Clients
+                    // Logic: For each new client, check if exists in 'clients' state.
+                    // If yes, update ID and merge. If no, keep new ID.
+                    const clientsToSave: Client[] = [];
+
+                    newClientsMap.forEach((newClient) => {
+                        const existing = clients.find(c => c.rfc === newClient.rfc);
+                        if (existing) {
+                            // Use existing ID to trigger update
+                            clientsToSave.push({ ...existing, ...newClient, id: existing.id });
+                        } else {
+                            clientsToSave.push(newClient);
+                        }
+                    });
+
+                    if (clientsToSave.length > 0) {
+                        // This might overwrite everything if saveAll replaces? 
+                        // WAIT: saveAll usuallly replaces ALL records if it's a simple JSON store.
+                        // But if it's a DB adapter, it might be an upsert. 
+                        // Looking at 'useFacturas.ts' > saveClient call > `await evoStore.clientes.add(...)`.
+                        // 'add' usually pushes one. 
+                        // 'saveAll' usually replaces the whole collection (in simple stores).
+                        // BUT `evoStore` types are not fully visible. 
+                        // Safest bet for 'saveAll' is pass (existing + new), OR call 'add' in parallel promise.all?
+                        // Promise.all(150 writes) is better than sequential awaits.
+
+                        // Re-reading 'evoStore.facturas.saveAll' usage in 'clearFacturacionData' -> verifies it CAN accept empty array to clear.
+                        // This implies it sets the state. 
+                        // So we must pass [ ...existing, ...new ]. 
+
+                        // Clients Merge
+                        const finalClients = [...clients];
+                        clientsToSave.forEach(c => {
+                            const idx = finalClients.findIndex(ex => ex.id === c.id);
+                            if (idx >= 0) finalClients[idx] = c;
+                            else finalClients.push(c);
+                        });
+                        await evoStore.clientes.saveAll(finalClients.map(facturasMapper.clientToCanonical));
+                        setClients(finalClients);
+                    }
+
+                    // 5b. Save Invoices (Assume Append)
+                    // Since we filtered duplicates, we can look at existing 'invoices'.
+                    const finalInvoices = [...invoices, ...newInvoices];
+                    await evoStore.facturas.saveAll(finalInvoices.map(facturasMapper.invoiceToCanonical));
+                    setInvoices(finalInvoices);
+
+                    // 5c. Create Batched Transactions
+                    // We need to create transactions for NEW invoices.
+                    // Original logic: `sync with RegistrosFinancieros`.
+                    const allTransactions = await evoStore.registrosFinancieros.getAll();
+                    const newTransactions: any[] = [];
+
+                    newInvoices.forEach(inv => {
+                        const transactionData = {
+                            date: inv.invoiceDate,
+                            concept: `Factura ${inv.folio} - ${inv.clientName}`,
+                            amount: inv.amount,
+                            type: 'ingreso' as const,
+                            source: 'facturacion-crm',
+                            metadata: {
+                                invoiceId: inv.id,
+                                folio: inv.folio,
+                                clientId: inv.rfc
+                            },
+                            referenciaId: inv.id
+                        };
+
+                        // Create transaction via createEvoTransaction for ID generation
+                        const tx = createEvoTransaction(transactionData);
+                        const canonicalTx = ingresosMapper.toCanonical(tx);
+                        canonicalTx.referenciaId = inv.id; // ensure consistency
+                        newTransactions.push(canonicalTx);
+                    });
+
+                    if (newTransactions.length > 0) {
+                        // Merge with existing
+                        const finalTransactions = [...allTransactions, ...newTransactions];
+                        await evoStore.registrosFinancieros.saveAll(finalTransactions);
+                    }
+
+                    // 6. Emit Events Once
+                    evoEvents.emit('invoice:updated');
+                    if (newTransactions.length > 0) evoEvents.emit('finance:updated');
+                }
+
+                console.timeEnd('import');
                 resolve({ imported, skipped, errors, skippedByReason, skippedDetails });
             };
             reader.readAsText(file);
         });
+    };
+
+    const repairConcepts = async () => {
+        const updatedInvoices = invoices.map(inv => {
+            if (!inv.concept && !inv.conceptoGeneral && !inv.descripcion) {
+                return { ...inv, concept: '(sin descripción recuperada)', conceptoGeneral: '(sin descripción recuperada)', descripcion: '(sin descripción recuperada)' };
+            }
+            const valid = inv.concept || inv.conceptoGeneral || inv.descripcion;
+            if (valid) {
+                return { ...inv, concept: inv.concept || valid, conceptoGeneral: inv.conceptoGeneral || valid, descripcion: inv.descripcion || valid };
+            }
+            return inv;
+        });
+
+        let changes = 0;
+        updatedInvoices.forEach((u, i) => {
+            const o = invoices[i];
+            if (u.concept !== o.concept) changes++;
+        });
+
+        if (changes > 0) {
+            console.log(`Reparing ${changes} invoices...`);
+            await evoStore.facturas.saveAll(updatedInvoices.map(facturasMapper.invoiceToCanonical));
+            setInvoices(updatedInvoices);
+            alert(`Reparadas ${changes} facturas. Recargando...`);
+        } else {
+            alert('Nada que reparar.');
+        }
+    };
+
+    const getNextFolio = () => {
+        const now = new Date().toISOString().slice(0, 10);
+        const suggestion = calculateNextFolio(invoices, 'C', now);
+        return suggestion.folio;
+    };
+
+    const suggestNextFolio = (serie: FolioSerie, dateStr: string) => {
+        return calculateNextFolio(invoices, serie, dateStr);
+    };
+
+    const duplicateInvoice = async (invoiceId: string) => {
+        const original = invoices.find(i => i.id === invoiceId);
+        if (!original) return;
+
+        const now = new Date().toISOString();
+        const dateStr = now.slice(0, 10);
+
+        const serie = getSerieFromFolio(original.folio);
+        const suggestion = calculateNextFolio(invoices, serie, dateStr);
+
+        const nextFolio = suggestion.isTaken && suggestion.nextAvailable
+            ? suggestion.nextAvailable
+            : suggestion.folio;
+
+        const newInvoice: Invoice = {
+            ...original,
+            id: crypto.randomUUID(),
+            folio: nextFolio,
+            invoiceDate: dateStr,
+            month: now.slice(0, 7),
+            paymentDate: undefined,
+            paid: false,
+            realized: false,
+            status: 'Pendiente',
+            createdAt: now,
+            updatedAt: now
+        };
+
+        await saveInvoice(newInvoice);
+        return newInvoice;
+    };
+
+    const getLastInvoiceForClient = (rfc: string) => {
+        return invoices
+            .filter(i => i.rfc === rfc)
+            .sort((a, b) => new Date(b.invoiceDate).getTime() - new Date(a.invoiceDate).getTime())[0];
+    };
+
+    const repairEncoding = async () => {
+        let changes = 0;
+
+        // 1. Fix Clients
+        const updatedClients = clients.map(c => {
+            const fixedC = { ...c };
+            let modified = false;
+
+            const fields: (keyof Client)[] = ['name', 'address', 'taxRegime', 'email'];
+            fields.forEach(f => {
+                const val = fixedC[f];
+                if (typeof val === 'string') {
+                    const fixed = fixMojibake(val);
+                    if (fixed !== val) {
+                        fixedC[f] = fixed;
+                        modified = true;
+                    }
+                }
+            });
+            if (modified) changes++;
+            return fixedC;
+        });
+
+        // 2. Fix Invoices
+        const updatedInvoices = invoices.map(inv => {
+            const fixedInv = { ...inv };
+            let modified = false;
+
+            // Fix relevant string fields
+            const fields: (keyof Invoice)[] = ['clientName', 'concept', 'conceptoGeneral', 'descripcion', 'cfdiUse', 'paymentMethod', 'status']; // Added status just in case (e.g. Pendiente)
+            fields.forEach(f => {
+                const val = fixedInv[f];
+                if (typeof val === 'string') {
+                    const fixed = fixMojibake(val);
+                    if (fixed !== val) {
+                        // @ts-ignore
+                        fixedInv[f] = fixed;
+                        modified = true;
+                    }
+                }
+            });
+
+            if (modified) changes++;
+            return fixedInv;
+        });
+
+        if (changes > 0) {
+            console.log(`Reparing encoding in ${changes} records...`);
+
+            // Save Clients
+            await evoStore.clientes.saveAll(updatedClients);
+            // Save Invoices
+            await evoStore.facturas.saveAll(updatedInvoices.map(facturasMapper.invoiceToCanonical));
+
+            // Update State
+            setClients(updatedClients);
+            setInvoices(updatedInvoices);
+
+            alert(`Se repararon caracteres dañados en ${changes} registros.`);
+        } else {
+            alert('No se encontraron problemas de codificación (mojibake).');
+        }
     };
 
     return {
@@ -501,11 +755,16 @@ export function useFacturas() {
         updateClient,
         saveInvoice,
         deleteInvoice,
+        duplicateInvoice,
+        getLastInvoiceForClient,
         clearFacturacionData,
         getNextFolio,
+        suggestNextFolio,
         exportCSV,
         importCSV,
         refresh: loadData,
+        repairConcepts,
+        repairEncoding, // New Expose
 
         // Pagination & Filters
         pagedInvoices,

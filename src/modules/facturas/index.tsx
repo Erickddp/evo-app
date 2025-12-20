@@ -17,16 +17,25 @@ const FacturasModule: React.FC = () => {
         exportCSV,
         importCSV,
         refresh,
+        // Pagination & Filters
         pagedInvoices,
         totalItems,
         totalPages,
         currentPage,
         setCurrentPage,
+
         filterDateFrom, setFilterDateFrom,
         filterDateTo, setFilterDateTo,
         filterCliente, setFilterCliente,
         filterFolio, setFilterFolio,
-        filterStatus, setFilterStatus
+        filterStatus, setFilterStatus,
+
+        // Core Actions
+        repairConcepts,
+        repairEncoding,
+        duplicateInvoice,
+        getLastInvoiceForClient,
+        suggestNextFolio
     } = useFacturas();
 
     const [view, setView] = useState<'list' | 'form'>('list');
@@ -228,8 +237,17 @@ const FacturasModule: React.FC = () => {
 
                         {/* List */}
                         <div className="flex-1 overflow-auto">
-                            <InvoiceList invoices={pagedInvoices} onSelectInvoice={handleSelectInvoice} onDelete={deleteInvoice} />
+                            <InvoiceList
+                                invoices={pagedInvoices}
+                                onSelectInvoice={handleSelectInvoice}
+                                onDelete={deleteInvoice}
+                                onDuplicate={async (invoice) => {
+                                    await duplicateInvoice(invoice.id);
+                                    refresh();
+                                }}
+                            />
                         </div>
+
 
                         {/* Pagination */}
                         <div className="mt-4 pt-4 border-t border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-slate-400">
@@ -266,11 +284,26 @@ const FacturasModule: React.FC = () => {
                         nextFolio={selectedInvoice ? selectedInvoice.folio : getNextFolio()}
                         onCancel={() => setView('list')}
                         initialData={selectedInvoice}
+                        getLastInvoiceForClient={getLastInvoiceForClient}
+                        suggestNextFolio={suggestNextFolio}
                     />
                 )}
             </div>
+
             {/* Danger Zone: Clear Data */}
-            <div className="flex justify-end mt-4">
+            <div className="flex justify-end mt-4 gap-4">
+                <button
+                    onClick={repairEncoding}
+                    className="flex items-center space-x-2 text-xs px-3 py-1.5 rounded-md border border-sky-900/50 text-sky-500 hover:bg-sky-900/20 hover:text-sky-400 hover:border-sky-700/50 transition-colors"
+                >
+                    <span>Reparar Acentos</span>
+                </button>
+                <button
+                    onClick={repairConcepts}
+                    className="flex items-center space-x-2 text-xs px-3 py-1.5 rounded-md border border-amber-900/50 text-amber-500 hover:bg-amber-900/20 hover:text-amber-400 hover:border-amber-700/50 transition-colors"
+                >
+                    <span>Reparar Conceptos</span>
+                </button>
                 <button
                     onClick={async () => {
                         if (window.confirm('ADVERTENCIA: ¿Estás seguro de que deseas ELIMINAR TODOS los datos de Facturación CRM?\n\nEsta acción borrará todas las facturas, clientes locales y registros financieros asociados a este módulo permanentemente.\n\nNo se puede deshacer.')) {

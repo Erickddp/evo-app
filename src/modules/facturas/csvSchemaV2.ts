@@ -30,6 +30,8 @@ export type FacturaCsvRowV2 = {
     metodoPago?: string;
     formaPago?: string;
     descripcion?: string;
+    concepto?: string; // Alias
+    conceptoGeneral?: string; // Alias
     regimenFiscal?: string;
     correoOContacto?: string;
 };
@@ -224,7 +226,9 @@ export function mapCsvRowV2ToInvoice(row: FacturaCsvRowV2): { invoice: Invoice; 
         clientName: row.nombre,
         rfc: row.rfc,
         email: clientStub.email,
-        concept: row.descripcion || '',
+        concept: row.descripcion || row.concepto || row.conceptoGeneral || '',
+        conceptoGeneral: row.conceptoGeneral || row.descripcion || '',
+        descripcion: row.descripcion || '',
         amount,
         status: isPaid ? 'Pagada' : 'Pendiente',
         paymentForm: row.formaPago || '99',

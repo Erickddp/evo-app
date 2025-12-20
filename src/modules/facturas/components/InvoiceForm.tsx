@@ -1,17 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { Trash2, ArrowLeft } from 'lucide-react';
+import { Trash2, ArrowLeft, RefreshCw, AlertTriangle } from 'lucide-react';
 import type { Client, Invoice } from '../types';
+import type { FolioSerie, FolioSuggestion } from '../utils/folioUtils';
 
 interface InvoiceFormProps {
     onSave: (invoice: Invoice, client: Client) => Promise<void>;
     clients: Client[];
-    nextFolio: string;
+    nextFolio: string; // Legacy prop, might be ignored if we auto-calc
     onCancel: () => void;
     onDelete?: (id: string) => Promise<void>;
     initialData?: Invoice;
+    getLastInvoiceForClient?: (rfc: string) => Invoice | undefined;
+    suggestNextFolio?: (serie: FolioSerie, dateStr: string) => FolioSuggestion;
 }
 
-export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextFolio, onCancel, onDelete, initialData }) => {
+export const InvoiceForm: React.FC<InvoiceFormProps> = ({
+    onSave, clients, nextFolio, onCancel, onDelete, initialData,
+    getLastInvoiceForClient, suggestNextFolio
+}) => {
+    // Determine initial serie from folio if editing, else default C
+    const getInitialSerie = (f: string): FolioSerie => {
+        if (!f) return 'C';
+        if (f.startsWith('A')) return 'A';
+        if (f.startsWith('B')) return 'B';
+        return 'C';
+    };
+
+    const [serie, setSerie] = useState<FolioSerie>(initialData ? getInitialSerie(initialData.folio) : 'C');
+    const [folioWarning, setFolioWarning] = useState<string | null>(null);
+    const [isFolioDirty, setIsFolioDirty] = useState(!!initialData); // If editing, dirty by default so we don't overwrite
+
+    // ...
     const [rfcSearch, setRfcSearch] = useState(initialData?.rfc || '');
     const [clientNameSearch, setClientNameSearch] = useState(initialData?.clientName || '');
 
@@ -75,23 +94,43 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
     }, [onCancel]);
 
     const handleClientSearch = (val: string, type: 'rfc' | 'name') => {
+        let found: Client | undefined;
+
         if (type === 'rfc') {
             setRfcSearch(val);
-            const found = clients.find(c => c.rfc.toLowerCase() === val.toLowerCase());
+            found = clients.find(c => c.rfc.toLowerCase() === val.toLowerCase());
             if (found) {
-                setClientData(found);
                 setClientNameSearch(found.name);
             } else {
                 setClientData(prev => ({ ...prev, rfc: val }));
             }
         } else {
             setClientNameSearch(val);
-            const found = clients.find(c => c.name.toLowerCase() === val.toLowerCase());
+            found = clients.find(c => c.name.toLowerCase() === val.toLowerCase());
             if (found) {
-                setClientData(found);
                 setRfcSearch(found.rfc);
             } else {
                 setClientData(prev => ({ ...prev, name: val }));
+            }
+        }
+
+        if (found) {
+            // 1. Autofill Client Data
+            setClientData(found);
+
+            // 2. Autofill Invoice Data from Last Invoice (if not editing an existing on)
+            if (!initialData && getLastInvoiceForClient) {
+                const lastInv = getLastInvoiceForClient(found.rfc);
+                if (lastInv) {
+                    setFormData(prev => ({
+                        ...prev,
+                        // Only overwrite if currently empty or default
+                        concept: (!prev.concept || prev.concept === 'Factura General') ? lastInv.concept : prev.concept,
+                        cfdiUse: (!prev.cfdiUse || prev.cfdiUse === 'G03') ? lastInv.cfdiUse : prev.cfdiUse,
+                        paymentMethod: (!prev.paymentMethod || prev.paymentMethod === 'PUE') ? lastInv.paymentMethod : prev.paymentMethod,
+                        paymentForm: (!prev.paymentForm || prev.paymentForm === '99') ? lastInv.paymentForm : prev.paymentForm,
+                    }));
+                }
             }
         }
     };
@@ -150,6 +189,43 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
         await onSave(invoiceToSave, clientToSave);
     };
 
+    // Auto-generate folio when serie or date changes, unless dirty
+    useEffect(() => {
+        if (!suggestNextFolio) return;
+        if (isFolioDirty) return; // Don't overwrite users manual input
+
+        const dateStr = formData.invoiceDate || new Date().toISOString().slice(0, 10);
+        const suggestion = suggestNextFolio(serie, dateStr);
+
+        if (suggestion.isTaken && !suggestion.nextAvailable) {
+            // Conflict without auto-resolution (shouldn't happen with new logic but safe)
+            setFolioWarning(`El folio ${suggestion.folio} ya existe.`);
+        } else if (suggestion.isTaken) {
+            setFolioWarning(`El folio ${suggestion.folio} ya existe.`);
+            // We don't auto-set conflict, we wait for user action or just show it empty?
+            // Requirement: "por default NO permitas autogenerar... agrega boton Forzar"
+            // But valid UX is: Show the conflict, don't set it in the field? 
+            // Or set it but make it invalid?
+            // Let's set empty in the field and show warning.
+            setFormData(prev => ({ ...prev, folio: '' }));
+        } else {
+            setFolioWarning(null);
+            setFormData(prev => ({ ...prev, folio: suggestion.folio }));
+        }
+    }, [serie, formData.invoiceDate, suggestNextFolio, isFolioDirty]);
+
+    const handleForceFolio = () => {
+        if (!suggestNextFolio) return;
+        const dateStr = formData.invoiceDate || new Date().toISOString().slice(0, 10);
+        const suggestion = suggestNextFolio(serie, dateStr);
+
+        if (suggestion.nextAvailable) {
+            setFormData(prev => ({ ...prev, folio: suggestion.nextAvailable }));
+            setFolioWarning(null);
+            setIsFolioDirty(true); // Treat as user-selected
+        }
+    };
+
     return (
         <form onSubmit={handleSubmit} className="space-y-6 bg-slate-800 p-6 rounded-lg border border-slate-700">
             {/* Top Bar: Close Button */}
@@ -166,15 +242,71 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({ onSave, clients, nextF
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Invoice Meta */}
-                <div>
-                    <label className="block text-sm font-medium text-slate-400">Folio</label>
-                    <input
-                        type="text"
-                        value={formData.folio}
-                        onChange={e => setFormData({ ...formData, folio: e.target.value })}
-                        className="mt-1 block w-full bg-slate-900 border-slate-700 rounded-md text-white px-3 py-2"
-                        required
-                    />
+                <div className="space-y-4">
+                    {/* Serie Selector */}
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Serie</label>
+                        <div className="flex space-x-2">
+                            {(['C', 'A', 'B'] as FolioSerie[]).map(s => (
+                                <button
+                                    key={s}
+                                    type="button"
+                                    onClick={() => {
+                                        setSerie(s);
+                                        setIsFolioDirty(false); // Reset dirty to allow auto-gen
+                                    }}
+                                    className={`px-3 py-1 rounded-md text-sm font-medium transition-colors border ${serie === s
+                                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                                        }`}
+                                >
+                                    Serie {s}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400">Folio</label>
+                        <div className="flex space-x-2">
+                            <input
+                                type="text"
+                                value={formData.folio}
+                                onChange={e => {
+                                    setFormData({ ...formData, folio: e.target.value });
+                                    setIsFolioDirty(true);
+                                    setFolioWarning(null);
+                                }}
+                                className={`mt-1 block w-full bg-slate-900 border rounded-md text-white px-3 py-2 ${folioWarning ? 'border-amber-500' : 'border-slate-700'}`}
+                                required
+                            />
+                            {!isFolioDirty && suggestNextFolio && (
+                                <button
+                                    type="button"
+                                    onClick={() => setIsFolioDirty(false)} // Trigger re-calc
+                                    className="mt-1 p-2 text-slate-400 hover:text-white border border-slate-700 rounded-md bg-slate-800"
+                                    title="Regenerar Folio"
+                                >
+                                    <RefreshCw size={18} />
+                                </button>
+                            )}
+                        </div>
+                        {folioWarning && (
+                            <div className="mt-2 text-amber-400 text-xs flex items-start gap-2 bg-amber-900/20 p-2 rounded border border-amber-900/50">
+                                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                                <div className="flex flex-col gap-1 w-full">
+                                    <span>{folioWarning}</span>
+                                    <button
+                                        type="button"
+                                        onClick={handleForceFolio}
+                                        className="text-left text-indigo-400 hover:text-indigo-300 underline font-medium"
+                                    >
+                                        Forzar consecutivo
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
                 <div>
                     <label className="block text-sm font-medium text-slate-400">Fecha Factura</label>

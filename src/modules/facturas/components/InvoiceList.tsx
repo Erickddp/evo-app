@@ -1,14 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Copy } from 'lucide-react';
 import type { Invoice } from '../types';
 
 interface InvoiceListProps {
     invoices: Invoice[];
     onSelectInvoice: (invoice: Invoice) => void;
     onDelete: (id: string) => Promise<void>;
+    onDuplicate: (invoice: Invoice) => Promise<void>;
 }
 
-export const InvoiceList: React.FC<InvoiceListProps> = ({ invoices, onSelectInvoice, onDelete }) => {
+export const InvoiceList: React.FC<InvoiceListProps> = ({ invoices, onSelectInvoice, onDelete, onDuplicate }) => {
     const [filterText, setFilterText] = useState('');
     const [filterMonth, setFilterMonth] = useState('');
     const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'unpaid'>('all');
@@ -121,7 +122,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({ invoices, onSelectInvo
                                         </td>
                                         <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap">
                                             <div className="text-sm text-slate-400 max-w-xs truncate" title={inv.concept}>
-                                                {inv.concept || 'Sin concepto'}
+                                                {inv.concept || inv.conceptoGeneral || inv.descripcion || 'Sin concepto'}
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right">
@@ -138,6 +139,16 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({ invoices, onSelectInvo
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-center">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onDuplicate(inv);
+                                                }}
+                                                className="p-2 text-slate-400 hover:text-indigo-400 hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                title="Duplicar Factura"
+                                            >
+                                                <Copy size={16} />
+                                            </button>
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
