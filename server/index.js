@@ -1,8 +1,7 @@
+import "dotenv/config";
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
-import pdf from 'pdf-parse';
-import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -19,13 +18,7 @@ app.use(express.json());
 // Multer setup for memory storage
 const upload = multer({ storage: multer.memoryStorage() });
 
-// OpenAI setup
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // --- DRIVE LIBRARY IMPLEMENTATION ---
 
@@ -155,7 +148,6 @@ app.post('/api/parse-bank-statement', upload.single('file'), async (req, res) =>
 
         const { parseBankStatementCore } = await import('./parseBankStatementCore.js');
 
-        const result = await parseBankStatementCore(req.file.buffer, process.env.OPENAI_API_KEY);
 
         res.json(result);
 
