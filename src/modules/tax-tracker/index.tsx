@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, TrendingUp, DollarSign, Info } from 'lucide-react';
-import { dataStore } from '../../core/data/dataStore';
 import { evoStore } from '../../core/evoappDataStore';
 import { taxPaymentMapper } from '../../core/mappers/taxPaymentMapper';
 import { ingresosMapper } from '../../core/mappers/ingresosMapper';
 import { type EvoTransaction } from '../../core/domain/evo-transaction';
 import type { TaxPayment } from './types';
+import { readLegacyEvoTransactions } from '../../core/data/legacyEvoTransactions';
 
 
 // --- Constants ---
@@ -50,12 +50,12 @@ export const TaxTrackerTool: React.FC = () => {
                 } else {
                     // Migration Check (if hooks.ts didn't run or empty)
                     // We rely on hooks.ts or just check here too for robustness
-                    const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                    const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
                     if (records.length > 0) {
                         const transactions = records[0].payload.transactions || [];
-                        const legacyItems = transactions.filter(t => t.type === 'impuesto');
+                        const legacyItems = transactions.filter((t: any) => t.type === 'impuesto');
                         if (legacyItems.length > 0) {
-                            loadedPayments = legacyItems.map(t => ({
+                            loadedPayments = legacyItems.map((t: any) => ({
                                 id: t.id,
                                 date: t.date,
                                 concept: t.concept,
@@ -79,7 +79,7 @@ export const TaxTrackerTool: React.FC = () => {
                     loadedTransactions = canonicalRegistros.map(ingresosMapper.toLegacy);
                 } else {
                     // Fallback to evo-transactions if migration hasn't happened
-                    const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                    const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
                     if (records.length > 0) {
                         loadedTransactions = records[0].payload.transactions || [];
                     }

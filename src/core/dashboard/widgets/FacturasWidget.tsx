@@ -3,6 +3,7 @@ import { FileText, Calendar } from 'lucide-react';
 import { dataStore } from '../../data/dataStore';
 import { evoStore } from '../../evoappDataStore';
 import { WidgetSkeleton, WidgetError, WidgetCard } from './WidgetCommon';
+import { evoEvents } from '../../events';
 
 type Period = 'currentMonth' | 'last3Months' | 'currentYear';
 
@@ -51,7 +52,14 @@ export function FacturasWidget() {
             }
         }
         void load();
-        return () => { isMounted = false; };
+
+        const handleReload = () => void load();
+        evoEvents.on('invoice:updated', handleReload);
+
+        return () => {
+            isMounted = false;
+            evoEvents.off('invoice:updated', handleReload);
+        };
     }, []);
 
     const stats = useMemo(() => {

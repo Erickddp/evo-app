@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import { FileCheck, ArrowUpRight, ArrowDownRight, AlertTriangle } from 'lucide-react';
+import { FileCheck, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { evoStore } from '../../evoappDataStore';
 import { dataStore } from '../../data/dataStore';
-import type { CfdiSummary } from '../../../modules/cfdi-validator/parser';
 import { WidgetSkeleton, WidgetError, WidgetCard } from './WidgetCommon';
+import { evoEvents } from '../../events';
+import { STORAGE_KEYS } from '../../data/storageKeys';
 
 interface CfdiStats {
-    totalProcessed: number;
-    emittedCount: number;
-    receivedCount: number;
-    invalidCount: number;
+    totalRecords: number;
+    totalIncome: number;
+    totalExpense: number;
     lastRun?: string;
 }
 
@@ -21,25 +22,36 @@ export function CfdiWidget() {
         let isMounted = true;
         async function load() {
             try {
-                const records = await dataStore.listRecords<{ rows: CfdiSummary[], errors: any[] }>('cfdi-validator');
-                if (!isMounted) return;
+                // 1. Load Canonical Financial Records (Source of Truth for impact)
+                const allFinancials = await evoStore.registrosFinancieros.getAll();
+                const cfdiRecords = allFinancials.filter(r => r.origen === 'cfdi');
 
-                if (records.length === 0) {
-                    setStats(null);
-                    setLoading(false);
-                    return;
+                // Calculate totals
+                const totalIncome = cfdiRecords
+                    .filter(r => r.tipo === 'ingreso')
+                    .reduce((sum, r) => sum + (Number(r.monto) || 0), 0);
+
+                const totalExpense = cfdiRecords
+                    .filter(r => r.tipo === 'gasto')
+                    .reduce((sum, r) => sum + (Number(r.monto) || 0), 0);
+
+                // 2. Load Legacy Last Run Info (for logs display only)
+                let lastRunDate: string | undefined;
+                try {
+                    const legacyLogs = await dataStore.listRecords<any>(STORAGE_KEYS.LEGACY.CFDI_VALIDATOR);
+                    if (legacyLogs.length > 0) {
+                        const latest = legacyLogs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+                        lastRunDate = latest.createdAt;
+                    }
+                } catch (e) {
+                    console.warn('Could not load legacy CFDI logs', e);
                 }
 
-                const latest = records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-                const rows = latest.payload.rows || [];
-                const invalid = (latest.payload.errors || []).length;
-
                 setStats({
-                    totalProcessed: rows.length + invalid,
-                    emittedCount: rows.filter(r => r.type === 'Emitted').length,
-                    receivedCount: rows.filter(r => r.type === 'Received').length,
-                    invalidCount: invalid,
-                    lastRun: latest.createdAt
+                    totalRecords: cfdiRecords.length,
+                    totalIncome,
+                    totalExpense,
+                    lastRun: lastRunDate
                 });
                 setLoading(false);
             } catch (e) {
@@ -51,7 +63,14 @@ export function CfdiWidget() {
             }
         }
         void load();
-        return () => { isMounted = false; };
+
+        const handleReload = () => void load();
+        evoEvents.on('finance:updated', handleReload);
+
+        return () => {
+            isMounted = false;
+            evoEvents.off('finance:updated', handleReload);
+        };
     }, []);
 
     if (loading) return <WidgetSkeleton />;
@@ -74,39 +93,39 @@ export function CfdiWidget() {
                     </div>
                 </div>
 
-                {!stats ? (
+                {!stats || stats.totalRecords === 0 ? (
                     <div className="text-center py-8">
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Sin validaciones de CFDI registradas.</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Sin movimientos CFDI registrados.</p>
                     </div>
                 ) : (
                     <div className="space-y-6">
-                        {/* Main Metric: Total */}
+                        {/* Main Metric: Total Impact Count */}
                         <div>
-                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Total Procesados</p>
+                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
+                                CFDI Impactando Finanzas
+                            </p>
                             <p className="text-4xl font-bold tracking-tight text-gray-900 dark:text-white">
-                                {stats.totalProcessed}
+                                {stats.totalRecords}
                             </p>
                         </div>
 
-                        {/* Breakdown Grid */}
-                        <div className="grid grid-cols-3 gap-2">
-                            <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800">
-                                <p className="text-[10px] font-medium text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                    <ArrowUpRight size={10} /> Emitidos
+                        {/* Financial Breakdown */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-800">
+                                <p className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                    <ArrowUpRight size={12} /> Ingresos (CFDI)
                                 </p>
-                                <p className="text-lg font-bold text-blue-700 dark:text-blue-300">{stats.emittedCount}</p>
+                                <p className="text-lg font-bold text-emerald-700 dark:text-emerald-300">
+                                    {stats.totalIncome.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' })}
+                                </p>
                             </div>
-                            <div className="p-2 rounded-lg bg-purple-50 dark:bg-purple-900/10 border border-purple-100 dark:border-purple-800">
-                                <p className="text-[10px] font-medium text-purple-600 dark:text-purple-400 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                    <ArrowDownRight size={10} /> Recibidos
+                            <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-800">
+                                <p className="text-[10px] font-medium text-rose-600 dark:text-rose-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                    <ArrowDownRight size={12} /> Gastos (CFDI)
                                 </p>
-                                <p className="text-lg font-bold text-purple-700 dark:text-purple-300">{stats.receivedCount}</p>
-                            </div>
-                            <div className={`p-2 rounded-lg border ${stats.invalidCount > 0 ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-800' : 'bg-gray-50 dark:bg-gray-800/50 border-gray-100 dark:border-gray-700'}`}>
-                                <p className={`text-[10px] font-medium uppercase tracking-wider mb-1 flex items-center gap-1 ${stats.invalidCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                                    <AlertTriangle size={10} /> Errores
+                                <p className="text-lg font-bold text-rose-700 dark:text-rose-300">
+                                    {stats.totalExpense.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' })}
                                 </p>
-                                <p className={`text-lg font-bold ${stats.invalidCount > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-700 dark:text-gray-300'}`}>{stats.invalidCount}</p>
                             </div>
                         </div>
                     </div>

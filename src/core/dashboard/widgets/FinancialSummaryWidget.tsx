@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { DollarSign, TrendingUp, TrendingDown, ArrowRight, AlertCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { type EvoTransaction } from '../../domain/evo-transaction';
-import { loadMovementsFromStore } from '../../../modules/ingresos-manager/utils';
+import { evoStore } from '../../evoappDataStore';
+import { evoEvents } from '../../events';
 
 interface IncomeStats {
     totalIncome: number;
@@ -20,7 +20,7 @@ export function FinancialSummaryWidget() {
         let isMounted = true;
         async function load() {
             try {
-                const movements: EvoTransaction[] = await loadMovementsFromStore();
+                const movements = await evoStore.registrosFinancieros.getAll();
                 if (!isMounted) return;
 
                 if (movements.length === 0) {
@@ -30,19 +30,18 @@ export function FinancialSummaryWidget() {
                 }
 
                 // Filter and calculate strictly based on 'ingreso' and 'gasto'
-                // Ignoring 'impuesto' and 'pago' types as requested
                 let totalIncome = 0;
                 let totalExpense = 0;
                 let count = 0;
 
                 movements.forEach(m => {
                     // Ensure we handle amounts as numbers
-                    const amt = Number(m.amount) || 0;
+                    const amt = Number(m.monto) || 0;
 
-                    if (m.type === 'ingreso') {
+                    if (m.tipo === 'ingreso') {
                         totalIncome += amt;
                         count++;
-                    } else if (m.type === 'gasto') {
+                    } else if (m.tipo === 'gasto') {
                         totalExpense += amt;
                         count++;
                     }
@@ -65,7 +64,14 @@ export function FinancialSummaryWidget() {
             }
         }
         void load();
-        return () => { isMounted = false; };
+
+        const handleReload = () => void load();
+        evoEvents.on('finance:updated', handleReload);
+
+        return () => {
+            isMounted = false;
+            evoEvents.off('finance:updated', handleReload);
+        };
     }, []);
 
     const formatCurrency = (val: number) => val.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });

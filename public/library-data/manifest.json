@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "updatedAt": "2024-12-20",
+  "root": [
+    {
+      "id": "intro",
+      "title": "Inicio",
+      "type": "doc",
+      "format": "md",
+      "url": "docs/inicio.md"
+    },
+    {
+      "id": "folder-1",
+      "title": "Guías Fiscales",
+      "type": "folder",
+      "children": [
+        {
+          "id": "doc-1",
+          "title": "Guía de Inicio",
+          "type": "doc",
+          "format": "md",
+          "url": "docs/inicio.md"
+        }
+      ]
+    }
+  ]
+}

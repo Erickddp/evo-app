@@ -9,8 +9,12 @@ import {
     FACTURAS_CSV_HEADERS_V2,
     mapInvoiceToCsvRowV2,
     mapCsvRowV2ToInvoice,
-    type FacturaCsvRowV2
+    buildV2HeaderMap,
+    type FacturaCsvRowV2,
+    type V2CanonicalField
 } from '../csvSchemaV2';
+import { parseCsv, toCsvRow, normalizeDate, parseAmount } from '../utils/csvParser';
+import { evoEvents } from '../../../core/events';
 
 const TOOL_ID = 'facturas-manager';
 
@@ -206,6 +210,9 @@ export function useFacturas() {
         } catch (e) {
             console.error('Error syncing invoice to transactions:', e);
         }
+
+        evoEvents.emit('invoice:updated');
+        evoEvents.emit('finance:updated');
     };
 
     const deleteInvoice = async (invoiceId: string) => {
@@ -231,6 +238,9 @@ export function useFacturas() {
             console.error('Error deleting invoice:', e);
             throw e; // Re-throw to handle in UI
         }
+
+        evoEvents.emit('invoice:updated');
+        evoEvents.emit('finance:updated');
     };
 
     const clearFacturacionData = async (): Promise<void> => {
@@ -276,6 +286,8 @@ export function useFacturas() {
             throw e;
         } finally {
             setLoading(false);
+            evoEvents.emit('invoice:updated');
+            evoEvents.emit('finance:updated');
         }
     };
 
@@ -292,31 +304,36 @@ export function useFacturas() {
     };
 
     const exportCSV = () => {
-        const headers = [...FACTURAS_CSV_HEADERS_V2];
+        const headers = FACTURAS_CSV_HEADERS_V2;
 
         const rows = invoices.map(inv => {
             const client = clients.find(c => c.rfc === inv.rfc);
-            const canonicalClient = client ? facturasMapper.clientToCanonical(client) : undefined;
-            const rowOnly = mapInvoiceToCsvRowV2(inv, canonicalClient);
+            // We use the mapping helper but then extract exact fields to ensure order matches headers
+            const rowObj = mapInvoiceToCsvRowV2(inv, client ? facturasMapper.clientToCanonical(client) : undefined);
 
-            return [
-                rowOnly.fecha,
-                rowOnly.numeroFactura,
-                rowOnly.nombre,
-                rowOnly.rfc,
-                rowOnly.monto,
-                rowOnly.fechaPago || '',
-                rowOnly.cp || '',
-                rowOnly.direccion || '',
-                rowOnly.metodoPago || '',
-                rowOnly.formaPago || '',
-                rowOnly.descripcion || '',
-                rowOnly.regimenFiscal || '',
-                rowOnly.correoOContacto || ''
-            ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',');
+            // STRICT ORDER according to FACTURAS_CSV_HEADERS_V2
+            const rowValues = [
+                rowObj.fecha,
+                rowObj.numeroFactura,
+                rowObj.nombre,
+                rowObj.rfc,
+                rowObj.monto,
+                rowObj.fechaPago,
+                rowObj.cp,
+                rowObj.direccion,
+                rowObj.metodoPago,
+                rowObj.formaPago,
+                rowObj.descripcion,
+                rowObj.regimenFiscal,
+                rowObj.correoOContacto
+            ];
+
+            return toCsvRow(rowValues);
         });
 
-        const csvContent = [headers.join(','), ...rows].join('\n');
+        const csvContent = [toCsvRow([...headers]), ...rows].join('\n'); // Standard uses CRLF usually but \n is fine for web
+
+        // Add BOM for Excel compatibility
         const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -350,9 +367,9 @@ export function useFacturas() {
                 const text = e.target?.result as string;
                 if (!text) return;
 
-                const lines = text.split(/\r?\n/).filter(l => l.trim());
+                // 1. Parse with RFC4180 parser (handles quotes and newlines)
+                const { data, errors: parseErrors } = parseCsv(text);
 
-                // Initialize result containers
                 const skippedByReason: Record<SkipReason, number> = {
                     invalid_fecha: 0,
                     invalid_monto: 0,
@@ -361,149 +378,10 @@ export function useFacturas() {
                     other: 0
                 };
                 const skippedDetails: SkippedRowInfo[] = [];
-
-                if (lines.length < 2) {
-                    resolve({ imported: 0, skipped: 0, errors: ['Archivo vacío o sin datos'], skippedByReason, skippedDetails });
-                    return;
-                }
-
-                // --- 1. DETECT DELIMITER ---
-                const detectDelimiter = (header: string): "," | ";" => {
-                    const commas = (header.match(/,/g) || []).length;
-                    const semis = (header.match(/;/g) || []).length;
-                    return semis > commas ? ";" : ",";
-                };
-
-                const delimiter = detectDelimiter(lines[0]);
-                console.log(`[Facturacion Import] Detected delimiter: "${delimiter}"`);
-
-                // Helper: Split CSV line respecting quotes with dynamic delimiter
-                const splitCSV = (line: string, delim: string) => {
-                    const res: string[] = [];
-                    let current = '';
-                    let inQuotes = false;
-                    for (let i = 0; i < line.length; i++) {
-                        const char = line[i];
-                        if (inQuotes) {
-                            if (char === '"') {
-                                if (i + 1 < line.length && line[i + 1] === '"') {
-                                    current += '"';
-                                    i++;
-                                } else {
-                                    inQuotes = false;
-                                }
-                            } else {
-                                current += char;
-                            }
-                        } else {
-                            if (char === '"') {
-                                inQuotes = true;
-                            } else if (char === delim) {
-                                res.push(current);
-                                current = '';
-                            } else {
-                                current += char;
-                            }
-                        }
-                    }
-                    res.push(current);
-                    return res;
-                };
-
-                // --- V2 HELPERS ---
-                // We use a robust normalizer and synonym map to detect columns
-                const normalizeHeader = (raw: string): string => {
-                    return raw
-                        .trim()
-                        .toLowerCase()
-                        .replace(/[áÁ]/g, "a")
-                        .replace(/[éÉ]/g, "e")
-                        .replace(/[íÍ]/g, "i")
-                        .replace(/[óÓ]/g, "o")
-                        .replace(/[úÚüÜ]/g, "u")
-                        .replace(/[^a-z0-9]+/g, " ")
-                        .replace(/\s+/g, " ")
-                        .trim();
-                };
-
-                const V2_HEADER_SYNONYMS: Record<string, string[]> = {
-                    fecha: ["fecha", "fecha emision", "fecha de emision"],
-                    numeroFactura: ["numero de factura", "numero de", "num de factura", "folio", "factura"],
-                    nombre: ["nombre", "nombre / razon social", "razon social", "cliente"],
-                    rfc: ["rfc"],
-                    monto: ["monto", "importe", "total", "monto total"],
-                    fechaPago: ["fecha de pago", "fecha pago"],
-                    cp: ["cp", "codigo postal", "c p"],
-                    direccion: ["direccion", "domicilio"],
-                    metodoPago: ["metodo de pago", "metodo pago"],
-                    formaPago: ["forma de pago", "forma pago"],
-                    descripcion: ["descripcion", "concepto", "detalle"],
-                    regimenFiscal: ["regimen fiscal", "regimen"],
-                    correoContacto: ["correo o contacto", "correo", "email", "correo electronico", "contacto"],
-                };
-
-                // Helper to build map
-                const buildV2HeaderMap = (rawHeaders: string[]): Record<string, number> | null => {
-                    const normalizedHeaders = rawHeaders.map(normalizeHeader);
-                    const map: Record<string, number> = {};
-
-                    const matchField = (field: string) => {
-                        const targets = V2_HEADER_SYNONYMS[field].map(normalizeHeader);
-                        const index = normalizedHeaders.findIndex((h) =>
-                            targets.some((t) => h.startsWith(t) || t.startsWith(h))
-                        );
-                        return index >= 0 ? index : undefined;
-                    };
-
-                    const fields = Object.keys(V2_HEADER_SYNONYMS);
-                    fields.forEach(f => {
-                        const idx = matchField(f);
-                        if (idx !== undefined) map[f] = idx;
-                    });
-
-                    // Required fields check: Date, Number, Amount are critical
-                    const required = ['fecha', 'numeroFactura', 'monto'];
-                    const hasAllRequired = required.every(f => map[f] !== undefined);
-
-                    return hasAllRequired ? map : null;
-                };
-
-                const parseMonto = (raw: string | number | null | undefined): number | null => {
-                    if (raw == null) return null;
-                    if (typeof raw === "number") return raw;
-                    const cleaned = String(raw).replace(/[^0-9.-]/g, "");
-                    if (!cleaned) return null;
-                    const value = Number(cleaned);
-                    return isFinite(value) ? value : null;
-                };
-
-                const normalizeDate = (raw: string | null | undefined): string | null => {
-                    if (!raw) return null;
-                    const s = String(raw).trim();
-                    if (!s) return null;
-                    if (s.includes("/")) {
-                        const [dd, mm, yyyy] = s.split(/[\/]/);
-                        if (dd && mm && yyyy) {
-                            if (dd.length <= 2 && mm.length <= 2 && yyyy.length === 4) {
-                                return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-                            }
-                        }
-                    }
-                    if (/\d{4}-\d{2}-\d{2}/.test(s)) return s;
-                    const d = new Date(s);
-                    if (isNaN(d.getTime())) return null;
-                    return d.toISOString().slice(0, 10);
-                };
-
-                // Detect V2
-                const fileHeaders = splitCSV(lines[0], delimiter);
-                const headerMap = buildV2HeaderMap(fileHeaders);
-                const isV2 = headerMap !== null;
-
+                const errors: string[] = [...parseErrors];
                 let imported = 0;
                 let skipped = 0;
-                const errors: string[] = [];
-                // Helper to register skipped row
+
                 const registerSkip = (rowIndex: number, reason: SkipReason, message: string, rawRow: string, details?: Record<string, any>) => {
                     skipped++;
                     skippedByReason[reason]++;
@@ -513,184 +391,100 @@ export function useFacturas() {
                     }
                 };
 
-                if (isV2 && headerMap) {
-                    // --- V2 LOGIC ---
-                    console.log("[Facturacion Import] V2 Detected with headers:", headerMap);
-
-                    for (let i = 1; i < lines.length; i++) {
-                        try {
-                            const rawRowStr = lines[i];
-                            const cols = splitCSV(rawRowStr, delimiter);
-
-                            const getRaw = (key: string) => {
-                                const idx = headerMap[key];
-                                if (idx === undefined || idx >= cols.length) return '';
-                                let val = cols[idx];
-                                if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1).replace(/""/g, '"');
-                                return val.trim();
-                            };
-
-                            const rawFecha = getRaw('fecha');
-                            const rawMonto = getRaw('monto');
-                            const rawFolio = getRaw('numeroFactura');
-
-                            const normalizedFecha = normalizeDate(rawFecha);
-                            const parsedMonto = parseMonto(rawMonto);
-
-                            // VALIDATION & LOGGING
-                            if (!normalizedFecha) {
-                                registerSkip(i + 1, 'invalid_fecha', `Fecha inválida: '${rawFecha}'`, rawRowStr, { rawFecha });
-                                continue;
-                            }
-                            if (parsedMonto === null) {
-                                registerSkip(i + 1, 'invalid_monto', `Monto inválido: '${rawMonto}'`, rawRowStr, { rawMonto });
-                                continue;
-                            }
-
-                            const finalFolio = rawFolio || 'S/NUM';
-
-                            if (invoices.some(inv => inv.folio === finalFolio)) {
-                                registerSkip(i + 1, 'duplicate_folio', `Folio duplicado: '${finalFolio}'`, rawRowStr, { folio: finalFolio });
-                                continue;
-                            }
-
-                            const rowData: FacturaCsvRowV2 = {
-                                fecha: normalizedFecha,
-                                numeroFactura: finalFolio,
-                                nombre: getRaw('nombre'),
-                                rfc: getRaw('rfc'),
-                                monto: String(parsedMonto),
-                                fechaPago: normalizeDate(getRaw('fechaPago')) || undefined,
-                                cp: getRaw('cp') || undefined,
-                                direccion: getRaw('direccion') || undefined,
-                                metodoPago: getRaw('metodoPago') || undefined,
-                                formaPago: getRaw('formaPago') || undefined,
-                                descripcion: getRaw('descripcion') || undefined,
-                                regimenFiscal: getRaw('regimenFiscal') || undefined,
-                                correoOContacto: getRaw('correoContacto') || undefined
-                            };
-
-                            const { invoice, client } = mapCsvRowV2ToInvoice(rowData);
-
-                            if (client.rfc) {
-                                const existingClient = clients.find(c => c.rfc === client.rfc);
-                                if (existingClient) {
-                                    await saveClient({ ...existingClient, ...client, id: existingClient.id });
-                                } else {
-                                    await saveClient(client);
-                                }
-                            }
-
-                            await saveInvoice(invoice);
-                            imported++;
-
-                        } catch (err) {
-                            errors.push(`V2 Import Error línea ${i + 1}: ${err}`);
-                            registerSkip(i + 1, 'other', `Error desconocido: ${err}`, lines[i], { error: String(err) });
-                        }
-                    }
-
-                } else {
-                    // LEGACY LOGIC with new delimiter support
-                    const headerRaw = lines[0];
-                    const legacyFileHeaders = splitCSV(headerRaw, delimiter).map(h => h.trim().toUpperCase());
-
-                    const header = legacyFileHeaders.map(h => h.replace(/"/g, ''));
-                    const colMap = new Map<string, number>();
-                    header.forEach((h, i) => colMap.set(h, i));
-
-                    const getValue = (cols: string[], name: string) => {
-                        const idx = colMap.get(name);
-                        if (idx === undefined) return '';
-                        let val = cols[idx];
-                        if (val && val.startsWith('"') && val.endsWith('"')) {
-                            val = val.slice(1, -1).replace(/""/g, '"');
-                        }
-                        return val ? val.trim() : '';
-                    };
-
-                    for (let i = 1; i < lines.length; i++) {
-                        try {
-                            const cols = splitCSV(lines[i], delimiter);
-
-                            const folio = getValue(cols, 'FOLIO');
-                            const fechaRaw = getValue(cols, 'FECHA');
-                            const montoRaw = getValue(cols, 'MONTO');
-
-                            if (!folio || !fechaRaw || !montoRaw) {
-                                skipped++;
-                                continue;
-                            }
-                            if (invoices.some(inv => inv.folio === folio)) {
-                                skipped++;
-                                continue;
-                            }
-                            const amount = parseFloat(montoRaw.replace(/[$,\s]/g, ''));
-                            if (isNaN(amount)) {
-                                skipped++;
-                                continue;
-                            }
-
-                            let invoiceDate = fechaRaw;
-                            if (fechaRaw.includes('/')) {
-                                const parts = fechaRaw.split('/');
-                                if (parts.length === 3) {
-                                    invoiceDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-                                }
-                            }
-
-                            const rfc = getValue(cols, 'RFC');
-                            const name = getValue(cols, 'CLIENTE');
-                            const email = getValue(cols, 'CORREO');
-
-                            if (rfc) {
-                                let client = clients.find(c => c.rfc === rfc);
-                                if (!client) {
-                                    client = {
-                                        id: crypto.randomUUID(),
-                                        rfc,
-                                        name: name || 'Cliente Sin Nombre',
-                                        email,
-                                        createdAt: new Date().toISOString(),
-                                        updatedAt: new Date().toISOString()
-                                    };
-                                    await saveClient(client);
-                                }
-                            }
-
-                            const status = getValue(cols, 'ESTADO');
-                            const invoice: Invoice = {
-                                id: crypto.randomUUID(),
-                                folio,
-                                invoiceDate,
-                                month: invoiceDate.slice(0, 7),
-                                clientName: name,
-                                rfc,
-                                email,
-                                concept: getValue(cols, 'CONCEPTO'),
-                                amount,
-                                status,
-                                paymentForm: getValue(cols, 'FORMA_PAGO'),
-                                paymentMethod: getValue(cols, 'METODO_PAGO'),
-                                cfdiUse: getValue(cols, 'USO_CFDI'),
-                                notes: getValue(cols, 'NOTAS'),
-                                paid: status.toLowerCase().includes('pagada') || status.toLowerCase() === 'paid',
-                                realized: true,
-                                createdAt: new Date().toISOString(),
-                                updatedAt: new Date().toISOString()
-                            };
-
-                            await saveInvoice(invoice);
-                            imported++;
-                        } catch (e) {
-                            errors.push(`Legacy Import Error línea ${i + 1}: ${e}`);
-                        }
-                    }
+                if (data.length < 2) {
+                    resolve({ imported: 0, skipped: 0, errors: ['Archivo vacío o sin datos'], skippedByReason, skippedDetails });
+                    return;
                 }
 
-                if (skipped > 0) {
-                    console.warn("[Facturacion V2 Import] Skipped counts by reason:", skippedByReason);
-                    console.warn("[Facturacion V2 Import] First skipped rows (up to 20):", skippedDetails);
+                // 2. Identify Headers
+                const fileHeaders = data[0];
+                const { map: headerMap, missing } = buildV2HeaderMap(fileHeaders);
+
+                // 3. Validate Mandatory Columns
+                if (missing.length > 0) {
+                    const msg = `Faltan columnas obligatorias: ${missing.join(', ')}`;
+                    errors.push(msg);
+                    resolve({ imported: 0, skipped: 0, errors, skippedByReason, skippedDetails });
+                    return;
+                }
+
+                console.log("[Facturacion Import] Headers detected:", headerMap);
+
+                // 4. Process Rows
+                for (let i = 1; i < data.length; i++) {
+                    const row = data[i];
+                    // Skip empty rows (already handled by parser, but double check)
+                    if (row.length === 0 || (row.length === 1 && !row[0])) continue;
+
+                    try {
+                        const getRaw = (field: V2CanonicalField): string => {
+                            const idx = headerMap[field];
+                            return (idx !== undefined && idx < row.length) ? row[idx] : '';
+                        };
+
+                        const rawFecha = getRaw('fecha');
+                        const rawMonto = getRaw('monto');
+                        const rawFolio = getRaw('numeroFactura');
+
+                        // Normalization
+                        const normalizedFecha = normalizeDate(rawFecha);
+                        const parsedMonto = parseAmount(rawMonto);
+
+                        // Validation
+                        if (!normalizedFecha) {
+                            registerSkip(i + 1, 'invalid_fecha', `Fecha inválida: '${rawFecha}'. Usa DD/MM/YYYY`, row.join(','), { rawFecha });
+                            continue;
+                        }
+                        if (parsedMonto === null) {
+                            registerSkip(i + 1, 'invalid_monto', `Monto inválido: '${rawMonto}'`, row.join(','), { rawMonto });
+                            continue;
+                        }
+
+                        const finalFolio = rawFolio ? rawFolio.trim() : 'S/NUM';
+                        if (invoices.some(inv => inv.folio === finalFolio)) {
+                            registerSkip(i + 1, 'duplicate_folio', `Folio duplicado: '${finalFolio}'`, row.join(','), { folio: finalFolio });
+                            continue;
+                        }
+
+                        const rawDescripcion = getRaw('descripcion');
+                        console.log('[Facturacion Import] descripcion:', rawDescripcion);
+
+                        // Map to Object
+                        const rowData: FacturaCsvRowV2 = {
+                            fecha: normalizedFecha,
+                            numeroFactura: finalFolio,
+                            nombre: getRaw('nombre'),
+                            rfc: getRaw('rfc'),
+                            monto: String(parsedMonto),
+                            fechaPago: normalizeDate(getRaw('fechaPago')) || undefined,
+                            cp: getRaw('cp') || undefined,
+                            direccion: getRaw('direccion') || undefined,
+                            metodoPago: getRaw('metodoPago') || undefined,
+                            formaPago: getRaw('formaPago') || undefined,
+                            descripcion: rawDescripcion || undefined,
+                            regimenFiscal: getRaw('regimenFiscal') || undefined,
+                            correoOContacto: getRaw('correoContacto') || undefined
+                        };
+
+                        // 5. Save Logic (Reused existing)
+                        const { invoice, client } = mapCsvRowV2ToInvoice(rowData);
+
+                        if (client.rfc) {
+                            const existingClient = clients.find(c => c.rfc === client.rfc);
+                            if (existingClient) {
+                                await saveClient({ ...existingClient, ...client, id: existingClient.id });
+                            } else {
+                                await saveClient(client);
+                            }
+                        }
+
+                        await saveInvoice(invoice);
+                        imported++;
+
+                    } catch (err) {
+                        errors.push(`Error al importar línea ${i + 1}: ${err}`);
+                        registerSkip(i + 1, 'other', `Error desconocido: ${err}`, row.join(','), { error: String(err) });
+                    }
                 }
 
                 resolve({ imported, skipped, errors, skippedByReason, skippedDetails });

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { dataStore } from '../../../core/data/dataStore';
+import { readLegacyEvoTransactions } from '../../../core/data/legacyEvoTransactions';
 import { evoStore } from '../../../core/evoappDataStore';
 import { type EvoTransaction } from '../../../core/domain/evo-transaction';
 import { normalizeMovements, type NormalizedMovement } from '../helpers';
@@ -45,7 +45,7 @@ export function useFinancialData() {
                 });
             } else {
                 // Fallback
-                const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
                 if (records.length > 0) {
                     const txs = records[0].payload.transactions || [];
                     transactions.push(...txs);

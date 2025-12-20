@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Settings, X, Check } from 'lucide-react';
+import { Settings, X, Check, RefreshCw } from 'lucide-react';
+import { evoEvents } from '../core/events';
 import { dataStore } from '../core/data/dataStore';
 import { registerWidget, getWidget, getAllWidgets } from '../core/dashboard/registry';
 import { type DashboardConfig, DEFAULT_DASHBOARD_CONFIG } from '../core/dashboard/types';
@@ -77,17 +78,30 @@ export function Dashboard() {
                     <h1 className="text-2xl font-semibold tracking-tight text-slate-50">
                         EVOAPP
                     </h1>
-                    <button
-                        onClick={() => setIsCustomizing(!isCustomizing)}
-                        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors duration-200 ${isCustomizing
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => {
+                                evoEvents.emit('finance:updated');
+                                evoEvents.emit('invoice:updated');
+                            }}
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200 text-xs font-medium transition-colors duration-200"
+                            title="Refrescar datos"
+                        >
+                            <RefreshCw size={14} />
+                            <span className="hidden sm:inline">Actualizar</span>
+                        </button>
+                        <button
+                            onClick={() => setIsCustomizing(!isCustomizing)}
+                            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors duration-200 ${isCustomizing
                                 ? 'bg-indigo-500/20 border-indigo-400 text-indigo-300'
                                 : 'border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/10 hover:border-indigo-400'
-                            }`}
-                        title="Personalizar Dashboard"
-                    >
-                        <Settings size={14} />
-                        <span>Personalizar</span>
-                    </button>
+                                }`}
+                            title="Personalizar Dashboard"
+                        >
+                            <Settings size={14} />
+                            <span>Personalizar</span>
+                        </button>
+                    </div>
                 </div>
 
                 {/* Customization Drawer/Panel */}

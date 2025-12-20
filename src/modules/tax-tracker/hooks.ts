@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { dataStore } from '../../core/data/dataStore';
 import { evoStore } from '../../core/evoappDataStore';
+import { readLegacyEvoTransactions } from '../../core/data/legacyEvoTransactions';
 import { taxPaymentMapper } from '../../core/mappers/taxPaymentMapper';
 import type { EvoTransaction } from '../../core/domain/evo-transaction';
 import type { TaxPayment, MonthlyTaxSummary } from './types';
@@ -44,7 +44,7 @@ export function useTaxSummary(year: number = getCurrentYear()): TaxSummary {
                     allPayments = canonicalPayments.map(taxPaymentMapper.toLegacy);
                 } else {
                     // 2. Migration: Try loading from evo-transactions
-                    const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                    const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
 
                     let transactions: EvoTransaction[] = [];
                     if (records.length > 0) {

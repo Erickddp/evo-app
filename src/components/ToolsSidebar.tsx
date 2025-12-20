@@ -68,7 +68,7 @@ export function ToolsSidebar({
                             transition-opacity duration-200
                             ${collapsed ? 'opacity-0 w-0 hidden' : 'opacity-100'}
                         `}>
-                            Available Tools
+                            Herramientas Disponibles
                         </div>
                     </div>
 

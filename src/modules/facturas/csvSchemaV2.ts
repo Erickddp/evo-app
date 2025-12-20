@@ -1,5 +1,6 @@
 import type { Invoice, Client } from './types';
 import type { Cliente } from '../../core/evoappDataModel';
+import { normalizeHeader } from './utils/csvParser';
 
 export const FACTURAS_CSV_HEADERS_V2 = [
     "FECHA",
@@ -33,22 +34,7 @@ export type FacturaCsvRowV2 = {
     correoOContacto?: string;
 };
 
-// Header normalization helper - tolerant of accents, punctuation, case
-export function normalizeHeader(raw: string): string {
-    return raw
-        .trim()
-        .toLowerCase()
-        // replace accented vowels
-        .replace(/[áÁ]/g, "a")
-        .replace(/[éÉ]/g, "e")
-        .replace(/[íÍ]/g, "i")
-        .replace(/[óÓ]/g, "o")
-        .replace(/[úÚüÜ]/g, "u")
-        // remove punctuation
-        .replace(/[^a-z0-9]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-}
+
 
 export type V2CanonicalField =
     | "fecha"
@@ -70,19 +56,19 @@ interface V2HeaderSynonyms {
 }
 
 export const V2_HEADER_SYNONYMS: V2HeaderSynonyms = {
-    fecha: ["fecha", "fecha emision", "fecha de emision"],
-    numeroFactura: ["numero de factura", "numero de", "num de factura", "folio", "factura"],
-    nombre: ["nombre", "nombre / razon social", "razon social", "cliente"],
-    rfc: ["rfc"],
-    monto: ["monto", "importe", "total", "monto total"],
-    fechaPago: ["fecha de pago", "fecha pago"],
-    cp: ["cp", "codigo postal", "c p"],
-    direccion: ["direccion", "domicilio"],
-    metodoPago: ["metodo de pago", "metodo pago"],
-    formaPago: ["forma de pago", "forma pago"],
-    descripcion: ["descripcion", "concepto", "detalle"],
-    regimenFiscal: ["regimen fiscal", "regimen"],
-    correoContacto: ["correo o contacto", "correo", "email", "correo electronico", "contacto"],
+    fecha: ["FECHA", "FECHA EMISION", "FECHA DE EMISION"],
+    numeroFactura: ["NUMERO DE FACTURA", "NUMERO DE", "NUM DE FACTURA", "FOLIO", "FACTURA", "NO FACTURA"],
+    nombre: ["NOMBRE", "NOMBRE RAZON SOCIAL", "RAZON SOCIAL", "CLIENTE"],
+    rfc: ["RFC"],
+    monto: ["MONTO", "IMPORTE", "TOTAL", "MONTO TOTAL"],
+    fechaPago: ["FECHA DE PAGO", "FECHA PAGO"],
+    cp: ["CP", "CODIGO POSTAL", "C P"],
+    direccion: ["DIRECCION", "DOMICILIO"],
+    metodoPago: ["METODO DE PAGO", "METODO PAGO"],
+    formaPago: ["FORMA DE PAGO", "FORMA PAGO"],
+    descripcion: ["DESCRIPCION", "DESCRIPCIÓN", "CONCEPTO", "CONCEPTOS", "DETALLE", "DESCRIPCION SERVICIO"], // Synonyms for Description
+    regimenFiscal: ["REGIMEN FISCAL", "REGIMEN"],
+    correoContacto: ["CORREO O CONTACTO", "CORREO", "EMAIL", "CORREO ELECTRONICO", "CONTACTO"],
 };
 
 export interface V2HeaderMap {
@@ -101,17 +87,22 @@ export interface V2HeaderMap {
     correoContacto?: number;
 }
 
-export function buildV2HeaderMap(rawHeaders: string[]): V2HeaderMap | null {
+export function buildV2HeaderMap(rawHeaders: string[]): { map: V2HeaderMap, missing: string[] } {
     const normalizedHeaders = rawHeaders.map(normalizeHeader);
     const map: V2HeaderMap = {};
 
-    function matchField(field: V2CanonicalField) {
-        const targets = V2_HEADER_SYNONYMS[field].map(normalizeHeader);
+    function matchField(field: V2CanonicalField): number | undefined {
+        const targets = V2_HEADER_SYNONYMS[field]; // Already uppercase/normalized
+
+        // Exact match first
+        for (const target of targets) {
+            const idx = normalizedHeaders.indexOf(target);
+            if (idx >= 0) return idx;
+        }
+
+        // Fuzzy match (starts with)
         const index = normalizedHeaders.findIndex((h) =>
-            targets.some((t) =>
-                // tolerate truncated headers: header starts with synonym OR synonym starts with header
-                h.startsWith(t) || t.startsWith(h)
-            )
+            targets.some((t) => h.includes(t) || t.includes(h))
         );
         return index >= 0 ? index : undefined;
     }
@@ -130,22 +121,18 @@ export function buildV2HeaderMap(rawHeaders: string[]): V2HeaderMap | null {
     map.regimenFiscal = matchField("regimenFiscal");
     map.correoContacto = matchField("correoContacto");
 
-    // REQUIRED core fields for V2 to be considered valid
-    const required = [
-        map.fecha,
-        map.numeroFactura,
-        // map.nombre, // Relaxing strictness - maybe just first 2 + monto?
-        // map.rfc,
-        map.monto,
-    ];
+    // REQUIRED core fields for V2
+    const requiredFields: V2CanonicalField[] = ["fecha", "numeroFactura", "monto"];
+    const missing: string[] = [];
 
-    const hasAllRequired = required.every((idx) => typeof idx === "number");
+    requiredFields.forEach(f => {
+        if (map[f] === undefined) {
+            // Map back to human readable
+            missing.push(f.toUpperCase());
+        }
+    });
 
-    if (!hasAllRequired) {
-        return null; // Header matching failed for critical fields
-    }
-
-    return map;
+    return { map, missing };
 }
 
 /* 

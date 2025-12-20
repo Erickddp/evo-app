@@ -5,10 +5,10 @@ import { EvoLibrary } from './index';
 export const evoLibraryDefinition: ToolDefinition = {
     meta: {
         id: 'evo-library',
-        name: 'EVO Library',
-        description: 'Biblioteca de documentos y recursos fiscales/contables.',
+        name: 'Biblioteca Contable',
+        description: 'Consulta de documentos fiscales y guías.',
         icon: Library,
-        version: '0.1.0'
+        version: '2.0.0-thin'
     },
     component: EvoLibrary
 };

@@ -31,6 +31,7 @@ export interface RegistroFinanciero {
     // Metadatos opcionales para trazabilidad
     referenciaId?: string;  // ID de factura o movimiento bancario relacionado
     etiquetas?: string[];
+    metadata?: Record<string, any>; // Extension flexible
     creadoEn?: string;      // ISO timestamp
     actualizadoEn?: string; // ISO timestamp
 }

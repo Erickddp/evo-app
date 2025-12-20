@@ -3,8 +3,11 @@ import { FileCheck, Upload, FileText, AlertCircle, Download, Search, Loader2, Ar
 import type { ToolDefinition } from '../shared/types';
 import { parseCfdiXml, type CfdiSummary } from './parser';
 import { dataStore } from '../../core/data/dataStore';
-import { createEvoTransaction, type EvoTransaction } from '../../core/domain/evo-transaction';
+import { evoStore } from '../../core/evoappDataStore'; // Imported evoStore
+import { STORAGE_KEYS } from '../../core/data/storageKeys'; // Imported STORAGE_KEYS
+import { evoEvents } from '../../core/events'; // Imported evoEvents
 import { Save } from 'lucide-react';
+import type { RegistroFinanciero } from '../../core/evoappDataModel';
 
 export const CFDIValidatorTool: React.FC = () => {
     const [files, setFiles] = useState<File[]>([]);
@@ -69,7 +72,7 @@ export const CFDIValidatorTool: React.FC = () => {
 
             // Save record to dataStore
             if (newRows.length > 0 || newErrors.length > 0) {
-                void dataStore.saveRecord('cfdi-validator', {
+                void dataStore.saveRecord(STORAGE_KEYS.LEGACY.CFDI_VALIDATOR, {
                     totalFiles: files.length,
                     parsedRows: newRows.length,
                     rows: newRows,
@@ -90,7 +93,7 @@ export const CFDIValidatorTool: React.FC = () => {
     useEffect(() => {
         const load = async () => {
             try {
-                const records = await dataStore.listRecords<{ rows: CfdiSummary[], errors: any[] }>('cfdi-validator');
+                const records = await dataStore.listRecords<{ rows: CfdiSummary[], errors: any[] }>(STORAGE_KEYS.LEGACY.CFDI_VALIDATOR);
                 if (records.length > 0) {
                     // Sort by createdAt descending
                     records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -148,49 +151,47 @@ export const CFDIValidatorTool: React.FC = () => {
         if (rows.length === 0) return;
 
         try {
-            // 1. Load existing transactions
-            const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
-            let existingTransactions: EvoTransaction[] = [];
-            if (records.length > 0) {
-                // Sort by createdAt descending
-                records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                existingTransactions = records[0].payload.transactions || [];
-            }
+            // 1. Load existing canonical records for duplicate check
+            const allRecords = await evoStore.registrosFinancieros.getAll();
 
-            // 2. Convert rows to EvoTransactions
-            const newTransactions: EvoTransaction[] = [];
+            // 2. Convert rows to RegistroFinanciero
             let addedCount = 0;
 
             for (const row of rows) {
-                // Skip if UUID already exists in metadata of existing transactions
-                const exists = existingTransactions.some(t => t.metadata?.uuid === row.uuid);
+                if (!row.uuid) continue;
+
+                // Anti-duplicate: Check if UUID already exists in metadata
+                const exists = allRecords.some(r => r.metadata?.uuid === row.uuid);
                 if (exists) continue;
 
                 // Determine type
-                let type: EvoTransaction['type'] = 'gasto'; // Default
-                if (row.type === 'Emitted') type = 'ingreso';
-                if (row.type === 'Received') type = 'gasto'; // Could be 'compra' or 'gasto'
+                let tipo: 'ingreso' | 'gasto' = 'gasto';
+                if (row.type === 'Emitted') tipo = 'ingreso';
+                if (row.type === 'Received') tipo = 'gasto';
 
                 // Parse amount
                 const amount = row.total ? parseFloat(row.total) : 0;
                 if (isNaN(amount) || amount === 0) continue;
 
-                const transaction = createEvoTransaction({
-                    date: row.fecha ? row.fecha.split('T')[0] : new Date().toISOString().split('T')[0],
-                    concept: `${row.emisorNombre || row.emisorRfc || 'Desconocido'} - ${row.uuid?.slice(0, 8)}`,
-                    amount: amount,
-                    type: type,
-                    source: 'cfdi',
+                const nuevoRegistro: RegistroFinanciero = {
+                    id: crypto.randomUUID(), // Canonical needs ID, UUID might be used but randomUUID is safer for PK
+                    fecha: row.fecha ? row.fecha.split('T')[0] : new Date().toISOString().split('T')[0],
+                    concepto: `${row.emisorNombre || row.emisorRfc || 'Desconocido'} - CFDI`,
+                    monto: amount,
+                    tipo: tipo,
+                    categoria: 'Sin Clasificar',
+                    origen: 'cfdi',
                     metadata: {
                         uuid: row.uuid,
-                        fileName: row.fileName,
-                        emisorRfc: row.emisorRfc,
-                        receptorRfc: row.receptorRfc,
-                        xmlData: row
-                    }
-                });
+                        rfcEmisor: row.emisorRfc,
+                        rfcReceptor: row.receptorRfc,
+                        tipoComprobante: row.tipoComprobante,
+                        fileName: row.fileName
+                    },
+                    creadoEn: new Date().toISOString()
+                };
 
-                newTransactions.push(transaction);
+                await evoStore.registrosFinancieros.add(nuevoRegistro);
                 addedCount++;
             }
 
@@ -199,15 +200,10 @@ export const CFDIValidatorTool: React.FC = () => {
                 return;
             }
 
-            // 3. Save updated list
-            const updatedTransactions = [...existingTransactions, ...newTransactions];
-            await dataStore.saveRecord('evo-transactions', {
-                transactions: updatedTransactions,
-                updatedAt: new Date().toISOString(),
-                count: updatedTransactions.length
-            });
+            // Emit update event
+            evoEvents.emit('finance:updated');
 
-            alert(`Se guardaron ${addedCount} movimientos exitosamente.`);
+            alert(`Se guardaron ${addedCount} movimientos exitosamente en Registros Financieros.`);
 
         } catch (e) {
             console.error('Error saving to unified model', e);

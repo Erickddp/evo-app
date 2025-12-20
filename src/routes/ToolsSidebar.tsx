@@ -29,8 +29,7 @@ export function ToolsSidebar({
             <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center h-[60px]">
                 {!collapsed && (
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white whitespace-nowrap overflow-hidden">
-                        Available Tools
-                    </h2>
+                        Herramientas Disponibles                   </h2>
                 )}
                 <button
                     onClick={onToggleCollapse}

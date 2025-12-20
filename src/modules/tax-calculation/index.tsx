@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Calculator, DollarSign, Calendar, TrendingUp, TrendingDown, AlertCircle, Save, CheckCircle, User, Edit2 } from 'lucide-react';
-import { dataStore } from '../../core/data/dataStore';
 import { evoStore } from '../../core/evoappDataStore';
 import { ingresosMapper } from '../../core/mappers/ingresosMapper';
+import { readLegacyEvoTransactions } from '../../core/data/legacyEvoTransactions';
 import { taxPaymentMapper } from '../../core/mappers/taxPaymentMapper';
 import { taxCalcMapper } from '../../core/mappers/taxCalcMapper';
 import type { RegistroFinanciero, PagoImpuesto } from '../../core/evoappDataModel';
@@ -29,13 +29,13 @@ export const TaxCalculationModule: React.FC = () => {
 
                 if (loadedRegistros.length === 0) {
                     // Fallback/Migration check (lazy)
-                    const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                    const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
                     if (records.length > 0) {
                         const transactions = records[0].payload.transactions || [];
                         // We don't migrate here to avoid duplication if other modules did it.
                         // Just map for display/calc
                         loadedRegistros = transactions
-                            .filter(t => t.type === 'ingreso' || t.type === 'gasto')
+                            .filter((t: any) => t.type === 'ingreso' || t.type === 'gasto')
                             .map(ingresosMapper.toCanonical);
                     }
                 }
@@ -47,12 +47,12 @@ export const TaxCalculationModule: React.FC = () => {
 
                 if (loadedPagos.length === 0) {
                     // Fallback
-                    const records = await dataStore.listRecords<{ transactions: EvoTransaction[] }>('evo-transactions');
+                    const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
                     if (records.length > 0) {
                         const transactions = records[0].payload.transactions || [];
                         loadedPagos = transactions
-                            .filter(t => t.type === 'impuesto')
-                            .map(t => ({
+                            .filter((t: any) => t.type === 'impuesto')
+                            .map((t: any) => ({
                                 id: t.id,
                                 date: t.date,
                                 concept: t.concept,

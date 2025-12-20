@@ -266,6 +266,7 @@ export function getYearlySummary(movements: EvoTransaction[]): YearlySummary[] {
 import { evoStore } from '../../core/evoappDataStore';
 import { ingresosMapper } from '../../core/mappers/ingresosMapper';
 import { dataStore } from '../../core/data/dataStore'; // Keep for legacy migration check
+import { evoEvents } from '../../core/events';
 
 export async function loadMovementsFromStore(): Promise<EvoTransaction[]> {
     try {
@@ -325,6 +326,9 @@ export async function saveSnapshot(transactions: EvoTransaction[]) {
 
         // 2. Save to Legacy Store (Backward Compatibility)
         await dataStore.saveRecord('ingresos-manager', { movements: transactions });
+
+        // 3. Emit Event
+        evoEvents.emit('finance:updated');
     } catch (e) {
         console.error('Failed to save snapshot', e);
     }
