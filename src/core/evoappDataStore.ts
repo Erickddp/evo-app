@@ -6,7 +6,8 @@ import type {
     Cliente,
     MovimientoBancario,
     PagoImpuesto,
-    CalculoImpuesto
+    CalculoImpuesto,
+    JourneyState
 } from './evoappDataModel';
 
 /**
@@ -30,12 +31,11 @@ type EntityType =
     | 'clientes'
     | 'movimientos-bancarios'
     | 'pagos-impuestos'
-    | 'calculos-impuestos';
+    | 'calculos-impuestos'
+    | 'journeys';
 
-interface UnifiedPayload<T> {
-    items: T[];
-    lastUpdated: string;
-}
+// Simplified payload: We store T[] directly in the snapshot.
+// Metadata like 'updatedAt' is handled by the dataStore record wrapper.
 
 class EntityStore<T extends { id: string }> {
     private entityType: EntityType;
@@ -45,20 +45,16 @@ class EntityStore<T extends { id: string }> {
     }
 
     async getAll(): Promise<T[]> {
-        const records = await dataStore.listRecords<UnifiedPayload<T>>(this.entityType);
-        if (records.length === 0) return [];
-        // Sort by most recent record update, but payload has all items.
-        // Usually we only have one record per toolId in the current architecture (snapshot model),
-        // but let's be robust.
-        const latest = records.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
-        return latest.payload.items || [];
+        // Read directly from current state snapshot
+        const items = await dataStore.getSnapshot<T[]>(this.entityType);
+        return items || [];
     }
 
     async saveAll(items: T[]): Promise<void> {
-        await dataStore.saveRecord(this.entityType, {
-            items,
-            lastUpdated: new Date().toISOString()
-        });
+        // Save directly as snapshot. 
+        // Logic for append-only history is NOT here anymore (user requested current-state focused).
+        // If history is needed, the DataStore could handle it internally or we use a separate 'archive' method.
+        await dataStore.setSnapshot(this.entityType, items);
         evoEvents.emit('data:changed');
     }
 
@@ -132,6 +128,7 @@ export const evoStore = {
     movimientosBancarios: new EntityStore<MovimientoBancario>('movimientos-bancarios'),
     pagosImpuestos: new EntityStore<PagoImpuesto>('pagos-impuestos'),
     calculosImpuestos: new EntityStore<CalculoImpuesto>('calculos-impuestos'),
+    journeys: new EntityStore<JourneyState>('journeys'),
 
     async exportAll(): Promise<Record<string, unknown>> {
         const data: Record<string, unknown> = {};

@@ -9,27 +9,35 @@ import { Dashboard } from './routes/Dashboard';
 import { ToolsHub } from './routes/ToolsHub';
 import { Settings } from './routes/Settings';
 
+import { JourneyCloseMonth } from './routes/JourneyCloseMonth';
+
 import { ProfileProvider } from './modules/core/profiles/ProfileProvider';
 import { DriveFabMenu } from './modules/backups/components/DriveFabMenu';
+
+import { DataGuard } from './core/data/DataGuard';
 
 function App() {
   return (
     <ThemeProvider defaultTheme="system" storageKey="evorix-theme">
       <ProfileProvider>
-        <SyncProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<MainLayout />}>
-                <Route index element={<Dashboard />} />
-                <Route path="tools" element={<ToolsHub />} />
-                <Route path="settings" element={<Settings />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Route>
-            </Routes>
-            {/* Global Google Drive FAB - Renders into body via Portal */}
-            <DriveFabMenu />
-          </BrowserRouter>
-        </SyncProvider>
+        <DataGuard>
+          <SyncProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route path="/" element={<MainLayout />}>
+                  <Route index element={<Dashboard />} />
+                  <Route path="tools" element={<ToolsHub />} />
+                  <Route path="tools/:toolId" element={<ToolsHub />} />
+                  <Route path="journey/close-month/:month" element={<JourneyCloseMonth />} />
+                  <Route path="settings" element={<Settings />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Route>
+              </Routes>
+              {/* Global Google Drive FAB - Renders into body via Portal */}
+              <DriveFabMenu />
+            </BrowserRouter>
+          </SyncProvider>
+        </DataGuard>
       </ProfileProvider>
     </ThemeProvider>
   );

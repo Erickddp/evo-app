@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { dataStore } from '../../../core/data/dataStore';
 import { evoStore } from '../../../core/evoappDataStore';
 import { facturasMapper } from '../../../core/mappers/facturasMapper';
 import { ingresosMapper } from '../../../core/mappers/ingresosMapper';
-import type { Client, Invoice, FacturaPayload } from '../types';
+import type { Client, Invoice } from '../types';
 import { createEvoTransaction } from '../../../core/domain/evo-transaction';
 import {
     FACTURAS_CSV_HEADERS_V2,
@@ -16,8 +15,6 @@ import {
 import { parseCsv, toCsvRow, normalizeDate, parseAmount } from '../utils/csvParser';
 import { calculateNextFolio, getSerieFromFolio, type FolioSerie } from '../utils/folioUtils';
 import { evoEvents } from '../../../core/events';
-
-const TOOL_ID = 'facturas-manager';
 
 function fixMojibake(input: string): string {
     try {
@@ -106,39 +103,9 @@ export function useFacturas() {
             if (canonicalClients.length > 0 || canonicalInvoices.length > 0) {
                 setClients(canonicalClients.map(facturasMapper.clientToLegacy));
                 setInvoices(canonicalInvoices.map(facturasMapper.invoiceToLegacy));
-            } else {
-                // 2. Migration: Check Legacy Store
-                console.log('No canonical facturas data, checking legacy store...');
-                const records = await dataStore.listRecords<FacturaPayload>(TOOL_ID);
-
-                if (records.length > 0) {
-                    const loadedClients: Client[] = [];
-                    const loadedInvoices: Invoice[] = [];
-
-                    records.forEach(record => {
-                        if (record.payload.type === 'client') {
-                            loadedClients.push(record.payload.data as Client);
-                        } else if (record.payload.type === 'invoice') {
-                            loadedInvoices.push(record.payload.data as Invoice);
-                        }
-                    });
-
-                    if (loadedClients.length > 0 || loadedInvoices.length > 0) {
-                        console.log(`Migrating ${loadedClients.length} clients and ${loadedInvoices.length} invoices to canonical store...`);
-
-                        // Save to new store
-                        if (loadedClients.length > 0) {
-                            await evoStore.clientes.saveAll(loadedClients.map(facturasMapper.clientToCanonical));
-                        }
-                        if (loadedInvoices.length > 0) {
-                            await evoStore.facturas.saveAll(loadedInvoices.map(facturasMapper.invoiceToCanonical));
-                        }
-
-                        setClients(loadedClients);
-                        setInvoices(loadedInvoices);
-                    }
-                }
             }
+            // Legacy Migration handled by MigrationService + DataGuard.
+            // If we are here, canonical is authoritative.
         } catch (error) {
             console.error('Error loading facturas data:', error);
         } finally {

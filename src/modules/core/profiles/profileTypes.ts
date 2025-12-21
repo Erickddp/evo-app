@@ -6,4 +6,12 @@ export type EvoProfile = {
     dbPrefix: string;    // "raquel" (para namespace local)
     createdAt: string;
     lastOpenedAt?: string;
+    // Fiscal Profile
+    taxRegime?: 'PM' | 'PF_RESICO'; // Obligatorio para operación, pero opcional en tipos viejos migrados
+    taxYear?: number;
+    periodicity?: 'monthly';
+    featureFlags?: {
+        journeyV1?: boolean;
+        taxEngineV1?: boolean;
+    };
 };

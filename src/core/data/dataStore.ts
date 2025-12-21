@@ -19,7 +19,13 @@ export interface ImportResult {
 export interface DataStore {
     saveRecord<T = unknown>(toolId: ToolId, payload: T): Promise<StoredRecord<T>>;
     listRecords<T = unknown>(toolId?: ToolId): Promise<StoredRecord<T>[]>;
+
+    // Snapshot API (Current State)
+    getSnapshot<T = unknown>(entityKey: string): Promise<T | null>;
+    setSnapshot<T = unknown>(entityKey: string, payload: T): Promise<void>;
+
     clearAll(): Promise<void>;
+    wipeAllRecords(): Promise<void>;
     exportAllAsCsv(): Promise<string>;
     exportToCSVBlob(): Promise<Blob>;
     importFromCsv(csvText: string, options?: { clearBefore?: boolean }): Promise<ImportResult>;
@@ -29,8 +35,16 @@ export interface DataStore {
 
 import { initDB, type EvorixDB } from './db';
 import type { IDBPDatabase } from 'idb';
+import { isLegacyReadonly } from '../../config/flags';
 
 const STORAGE_KEY = 'evorix-core-data';
+
+const BLOCKED_LEGACY_TOOLS = [
+    'evo-transactions',
+    'ingresos-manager',
+    'facturas-manager',
+    'cfdi-validator'
+];
 
 class IndexedDBDataStore implements DataStore {
     private dbPromise: Promise<IDBPDatabase<EvorixDB>>;
@@ -83,7 +97,52 @@ class IndexedDBDataStore implements DataStore {
         }
     }
 
+    isLegacyWriteAttempt(): boolean {
+        return isLegacyReadonly();
+    }
+
     async saveRecord<T = unknown>(toolId: ToolId, payload: T): Promise<StoredRecord<T>> {
+        // 1. Block specific legacy tools
+        if (BLOCKED_LEGACY_TOOLS.includes(toolId)) {
+            const msg = `[DataStore] Bloqueando escritura a legacy toolId: ${toolId}`;
+            console.warn(msg);
+            // In DEV throw to alert, in PROD mostly ignore/noop to prevent crash
+            if (import.meta.env.DEV) {
+                throw new Error(msg);
+            }
+            const now = new Date().toISOString();
+            return {
+                id: 'noop-blocked-legacy',
+                toolId,
+                createdAt: now,
+                updatedAt: now,
+                payload
+            };
+        }
+
+        // Feature Flag Check: Legacy Read-Only Mode
+        // Prevents new writes to the legacy IndexedDB store to prepare for migration/rebase.
+        if (this.isLegacyWriteAttempt()) {
+            const msg = '[DataStore] Save prevented: Legacy storage is READ-ONLY.';
+            console.warn(msg);
+
+            // En DEV, lanzar error para que el desarrollador sepa que está usándolo mal.
+            // En PROD, solo warning y noop para evitar crash de la app si algo se escapó.
+            if (import.meta.env.DEV) {
+                throw new Error('System is in maintenance/read-only mode. Changes not saved.');
+            }
+
+            // Noop return for Prod
+            const now = new Date().toISOString();
+            return {
+                id: 'noop-legacy-readonly',
+                toolId,
+                createdAt: now,
+                updatedAt: now,
+                payload,
+            };
+        }
+
         const db = await this.dbPromise;
         const now = new Date().toISOString();
         const newRecord: StoredRecord<T> = {
@@ -105,9 +164,50 @@ class IndexedDBDataStore implements DataStore {
         return (await db.getAll('records')) as StoredRecord<T>[];
     }
 
+    // --- Snapshot Implementation ---
+    private getSnapshotId(key: string): string {
+        return `SNAPSHOT:${key}`;
+    }
+
+    async getSnapshot<T = unknown>(entityKey: string): Promise<T | null> {
+        const db = await this.dbPromise;
+        const id = this.getSnapshotId(entityKey);
+        const record = await db.get('records', id);
+        return record ? (record.payload as T) : null;
+    }
+
+    async setSnapshot<T = unknown>(entityKey: string, payload: T): Promise<void> {
+        const db = await this.dbPromise;
+        const id = this.getSnapshotId(entityKey);
+        const now = new Date().toISOString();
+
+        await db.put('records', {
+            id,
+            toolId: entityKey,
+            createdAt: now, // Preserved if existing? ideally yes but for simplicity strict UPSERT
+            updatedAt: now,
+            payload
+        });
+    }
+    // -------------------------------
+
     async clearAll(): Promise<void> {
         const db = await this.dbPromise;
         await db.clear('records');
+    }
+
+    async wipeAllRecords(): Promise<void> {
+        console.log('[DataStore] Wiping ALL records (Physical DB Clear)...');
+        const db = await this.dbPromise;
+        const storeNames = Array.from(db.objectStoreNames);
+        if (storeNames.length === 0) return;
+
+        const tx = db.transaction(storeNames, 'readwrite');
+        await Promise.all([
+            ...storeNames.map(name => tx.objectStore(name).clear()),
+            tx.done
+        ]);
+        console.log('[DataStore] Wipe Completed.');
     }
 
     async importFromCsv(csvText: string, options?: { clearBefore?: boolean }): Promise<ImportResult> {

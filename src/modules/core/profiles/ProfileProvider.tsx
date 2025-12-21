@@ -10,6 +10,7 @@ interface ProfileContextValue {
     switchProfile: (profileId: string) => Promise<boolean>; // return success (might be cancelled)
     renameProfile: (profileId: string, name: string) => void;
     deleteProfile: (profileId: string) => void;
+    updateProfile: (profile: EvoProfile) => void;
     // UI Helpers
     showUnsavedModal: boolean;
     pendingProfileId: string | null;
@@ -27,18 +28,47 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const [activeProfile, setActiveProfile] = useState<EvoProfile>(profileStore.list()[0]);
     const [justCreatedProfileId, setJustCreatedProfileId] = useState<string | null>(null);
 
-    // Initial Load
+    // Initial Load & Migration
     useEffect(() => {
-        const list = profileStore.list();
-        const activeId = profileStore.getActiveId();
-        const active = list.find(p => p.id === activeId) || list[0];
+        const load = async () => {
+            const list = profileStore.list();
+            const activeId = profileStore.getActiveId();
+            const active = list.find(p => p.id === activeId) || list[0];
 
-        setProfiles(list);
-        setActiveProfile(active);
+            setProfiles(list);
+            setActiveProfile(active);
 
-        // Initialize DB for this profile
-        evoStore.reinitialize(active.dbPrefix);
+            // Initialize DB for this profile
+            await evoStore.reinitialize(active.dbPrefix);
+
+            // Run Migration
+            // This ensures every profile load checks for pending migrations
+            try {
+                // If we want blocking UI, we could expose an isMigrating state
+                // For now, simpler integration as requested "Mostrar: loading bloqueante solo si hay migración ... mensaje..."
+                // But this runs inside useEffect. We need state.
+                setMigrationLoading(true);
+                const { migrationService } = await import('../migrations/MigrationService');
+                await migrationService.runMigration();
+            } finally {
+                setMigrationLoading(false);
+            }
+        };
+        load();
     }, []);
+
+    const [migrationLoading, setMigrationLoading] = useState(false);
+
+    if (migrationLoading) {
+        return (
+            <div className="fixed inset-0 bg-white dark:bg-gray-900 flex items-center justify-center z-50">
+                <div className="text-center">
+                    <h2 className="text-xl font-semibold text-indigo-600 mb-2">Preparando datos...</h2>
+                    <p className="text-gray-500">Optimizando tu historial financiero.</p>
+                </div>
+            </div>
+        );
+    }
 
     const createProfile = (name: string) => {
         const id = crypto.randomUUID().slice(0, 8); // simplified ID
@@ -88,6 +118,15 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
     };
 
+    // Generic update (e.g. for fiscal settings)
+    const updateProfile = (profile: EvoProfile) => {
+        profileStore.upsert(profile);
+        setProfiles(profileStore.list());
+        if (activeProfile.id === profile.id) {
+            setActiveProfile(profile);
+        }
+    };
+
     const deleteProfile = (id: string) => {
         if (id === activeProfile.id) {
             alert("No puedes borrar el perfil activo.");
@@ -106,6 +145,7 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
             createProfile,
             switchProfile,
             renameProfile,
+            updateProfile,
             deleteProfile,
             // Deprecated/Moved to UI component logic
             showUnsavedModal: false,
@@ -126,3 +166,5 @@ export const useProfile = () => {
     if (!ctx) throw new Error("useProfile must be used within ProfileProvider");
     return ctx;
 };
+// Alias for consistency
+export const useProfiles = useProfile;

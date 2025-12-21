@@ -1,6 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
 import { FileText, Calendar } from 'lucide-react';
-import { dataStore } from '../../data/dataStore';
 import { evoStore } from '../../evoappDataStore';
 import { WidgetSkeleton, WidgetError, WidgetCard } from './WidgetCommon';
 import { evoEvents } from '../../events';
@@ -23,21 +22,10 @@ export function FacturasWidget() {
 
                 if (canonicalInvoices.length > 0) {
                     loadedInvoices = canonicalInvoices;
-                } else {
-                    const legacyRecords = await dataStore.listRecords<any>('facturas-manager');
-                    if (legacyRecords.length > 0) {
-                        loadedInvoices = legacyRecords
-                            .filter(r => r.payload.type === 'invoice')
-                            .map(r => r.payload.data)
-                            // Map legacy to generic structure if needed - key fields are date/fecha, amount/total, paid state
-                            .map(legacy => ({
-                                ...legacy,
-                                fechaEmision: legacy.date || legacy.createdAt, // Ensure date field availability
-                                total: Number(legacy.amount) || 0,
-                                pagada: !!legacy.paid
-                            }));
-                    }
                 }
+
+                // Legacy Migration handled by MigrationService.
+                // We do not fallback here anymore.
 
                 if (isMounted) {
                     setInvoices(loadedInvoices);

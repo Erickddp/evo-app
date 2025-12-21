@@ -17,24 +17,9 @@
 /**
  * Representa un movimiento de dinero (Ingreso o Gasto).
  * Módulos: Ingresos Manager, Estado Financiero.
- * Mapeo actual: `EvoTransaction` (src/core/domain/evo-transaction.ts)
+ * Mapeo actual: `RegistroFinanciero` (Canonical Financial Record - CFR)
  */
-export interface RegistroFinanciero {
-    id: string;
-    fecha: string;          // ISO 8601 (YYYY-MM-DD)
-    concepto: string;       // Descripción corta
-    monto: number;          // Valor absoluto (siempre positivo)
-    tipo: 'ingreso' | 'gasto';
-    categoria?: string;     // Opcional: Clasificación (ej. "Servicios", "Nómina")
-    origen: string;         // 'manual', 'factura', 'banco', 'importacion'
-
-    // Metadatos opcionales para trazabilidad
-    referenciaId?: string;  // ID de factura o movimiento bancario relacionado
-    etiquetas?: string[];
-    metadata?: Record<string, any>; // Extension flexible
-    creadoEn?: string;      // ISO timestamp
-    actualizadoEn?: string; // ISO timestamp
-}
+export type { RegistroFinanciero } from '../modules/core/financial/types';
 
 // ==========================================
 // 2. FACTURACIÓN Y CLIENTES
@@ -167,3 +152,28 @@ export interface CalculoImpuesto {
  * | Bank Reconciler       | (Internal State)      | MovimientoBancario        |
  * | Tax Calculation       | (Internal State)      | CalculoImpuesto           |
  */
+
+// ==========================================
+// 5. JOURNEY (WORKFLOW STATE)
+// ==========================================
+
+export interface JourneyStep {
+    id: string;
+    title: string;
+    status: 'pending' | 'done' | 'blocked';
+    blockedBy?: string[];
+    cta?: string;
+    description?: string;
+}
+
+/**
+ * Estado persistido de un Journey (ej. Cierre Mensual).
+ * Identifica el progreso del usuario en un flujo de trabajo.
+ */
+export interface JourneyState {
+    id: string;         // Composite: `${journeyId}:${month}` or UUID
+    journeyId: string;  // e.g. 'monthly-close'
+    month: string;      // 'YYYY-MM'
+    steps: JourneyStep[];
+    updatedAt: string;
+}

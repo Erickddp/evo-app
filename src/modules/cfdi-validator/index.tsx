@@ -2,12 +2,9 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { FileCheck, Upload, FileText, AlertCircle, Download, Search, Loader2, ArrowUpDown } from 'lucide-react';
 import type { ToolDefinition } from '../shared/types';
 import { parseCfdiXml, type CfdiSummary } from './parser';
-import { dataStore } from '../../core/data/dataStore';
-import { evoStore } from '../../core/evoappDataStore'; // Imported evoStore
-import { STORAGE_KEYS } from '../../core/data/storageKeys'; // Imported STORAGE_KEYS
-import { evoEvents } from '../../core/events'; // Imported evoEvents
+import { evoStore } from '../../core/evoappDataStore';
 import { Save } from 'lucide-react';
-import type { RegistroFinanciero } from '../../core/evoappDataModel';
+import { normalizeToRegistroFinanciero } from '../core/normalize/normalizeToRegistroFinanciero';
 
 export const CFDIValidatorTool: React.FC = () => {
     const [files, setFiles] = useState<File[]>([]);
@@ -70,43 +67,12 @@ export const CFDIValidatorTool: React.FC = () => {
             setRows(newRows);
             setErrors(newErrors);
 
-            // Save record to dataStore
-            if (newRows.length > 0 || newErrors.length > 0) {
-                void dataStore.saveRecord(STORAGE_KEYS.LEGACY.CFDI_VALIDATOR, {
-                    totalFiles: files.length,
-                    parsedRows: newRows.length,
-                    rows: newRows,
-                    errors: newErrors,
-                    timestamp: new Date().toISOString(),
-                    targetRfc // Log the RFC used for classification
-                });
-            }
-
         } catch (e) {
             console.error("Critical error processing files", e);
         } finally {
             setIsProcessing(false);
         }
     };
-
-    // Load previous session
-    useEffect(() => {
-        const load = async () => {
-            try {
-                const records = await dataStore.listRecords<{ rows: CfdiSummary[], errors: any[] }>(STORAGE_KEYS.LEGACY.CFDI_VALIDATOR);
-                if (records.length > 0) {
-                    // Sort by createdAt descending
-                    records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                    const latest = records[0].payload;
-                    if (latest.rows) setRows(latest.rows);
-                    if (latest.errors) setErrors(latest.errors);
-                }
-            } catch (e) {
-                console.error('Failed to load CFDI history', e);
-            }
-        };
-        load();
-    }, []);
 
     const handleExportCsv = () => {
         if (rows.length === 0) return;
@@ -153,57 +119,88 @@ export const CFDIValidatorTool: React.FC = () => {
         try {
             // 1. Load existing canonical records for duplicate check
             const allRecords = await evoStore.registrosFinancieros.getAll();
-
-            // 2. Convert rows to RegistroFinanciero
             let addedCount = 0;
+            let updatedCount = 0;
 
             for (const row of rows) {
                 if (!row.uuid) continue;
 
-                // Anti-duplicate: Check if UUID already exists in metadata
-                const exists = allRecords.some(r => r.metadata?.uuid === row.uuid);
-                if (exists) continue;
-
-                // Determine type
-                let tipo: 'ingreso' | 'gasto' = 'gasto';
-                if (row.type === 'Emitted') tipo = 'ingreso';
-                if (row.type === 'Received') tipo = 'gasto';
-
-                // Parse amount
-                const amount = row.total ? parseFloat(row.total) : 0;
-                if (isNaN(amount) || amount === 0) continue;
-
-                const nuevoRegistro: RegistroFinanciero = {
-                    id: crypto.randomUUID(), // Canonical needs ID, UUID might be used but randomUUID is safer for PK
-                    fecha: row.fecha ? row.fecha.split('T')[0] : new Date().toISOString().split('T')[0],
-                    concepto: `${row.emisorNombre || row.emisorRfc || 'Desconocido'} - CFDI`,
-                    monto: amount,
-                    tipo: tipo,
-                    categoria: 'Sin Clasificar',
-                    origen: 'cfdi',
-                    metadata: {
-                        uuid: row.uuid,
-                        rfcEmisor: row.emisorRfc,
-                        rfcReceptor: row.receptorRfc,
-                        tipoComprobante: row.tipoComprobante,
-                        fileName: row.fileName
-                    },
-                    creadoEn: new Date().toISOString()
+                // Adapt CfdiSummary to Normalizer Input
+                const normalizerInput = {
+                    invoiceDate: row.fecha,
+                    amount: row.total ? parseFloat(row.total) : 0,
+                    rfc: row.emisorRfc, // This is ambiguous for normalizer without context, but we pass full details in metadata
+                    uuid: row.uuid,
+                    folio: row.folio,
+                    concept: `${row.emisorNombre || row.emisorRfc} - CFDI`,
+                    // Hints for normalizer
+                    type: row.type === 'Emitted' ? 'ingreso' : row.type === 'Received' ? 'gasto' : undefined,
+                    source: 'cfdi' as const
                 };
 
-                await evoStore.registrosFinancieros.add(nuevoRegistro);
-                addedCount++;
+                // Use Normalizer
+                const cfr = normalizeToRegistroFinanciero(normalizerInput, {
+                    // Explicitly override inferred type if we know it from CFDI classification
+                    defaultType: row.type === 'Emitted' ? 'ingreso' : 'gasto',
+                    defaultSource: 'cfdi'
+                });
+
+                // Dedupe Logic (UUID)
+                const existingIdx = allRecords.findIndex(r => r.links?.xmlUuid === row.uuid || r.metadata?.uuid === row.uuid);
+
+                if (existingIdx >= 0) {
+                    // Update existing? "Si existe: actualizar metadata y updatedAt"
+                    const existing = allRecords[existingIdx];
+                    const updated = {
+                        ...existing,
+                        updatedAt: new Date().toISOString(),
+                        // Merge metadata?
+                        metadata: {
+                            ...existing.metadata,
+                            ...cfr.metadata,
+                            // Ensure we keep specific CFDI fields
+                            fileName: row.fileName,
+                            tipoComprobante: row.tipoComprobante
+                        },
+                        // Maybe update links if missing
+                        links: {
+                            ...existing.links,
+                            xmlUuid: row.uuid
+                        }
+                    };
+                    // In-memory update for batch save?
+                    // evoStore doesn't strictly support batch update via `add`, but we can putMany later or update individually.
+                    // To avoid O(N^2) writes if using `saveAll` repeatedly, we should batch.
+                    // But evoStore.registrosFinancieros.add() does a full read-write cycle!
+                    // We must use `putMany` logic or modify the loaded array and save once.
+                    allRecords[existingIdx] = updated;
+                    updatedCount++;
+                } else {
+                    // Add new
+                    // Enhance metadata
+                    cfr.metadata = {
+                        ...cfr.metadata,
+                        fileName: row.fileName,
+                        rfcEmisor: row.emisorRfc,
+                        rfcReceptor: row.receptorRfc,
+                        tipoComprobante: row.tipoComprobante
+                    };
+                    allRecords.push(cfr);
+                    addedCount++;
+                }
             }
 
-            if (addedCount === 0) {
-                alert('No hay nuevos movimientos para guardar (posibles duplicados).');
+            if (addedCount === 0 && updatedCount === 0) {
+                alert('No hay cambios. Todos los movimientos ya existen.');
                 return;
             }
 
-            // Emit update event
-            evoEvents.emit('finance:updated');
+            // Batch Save
+            await evoStore.registrosFinancieros.saveAll(allRecords);
 
-            alert(`Se guardaron ${addedCount} movimientos exitosamente en Registros Financieros.`);
+            // Emit update event -> Handled by saveAll (data:changed)
+
+            alert(`Proceso completado: ${addedCount} nuevos, ${updatedCount} actualizados.`);
 
         } catch (e) {
             console.error('Error saving to unified model', e);

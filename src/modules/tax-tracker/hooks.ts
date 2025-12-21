@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { evoEvents } from '../../core/events';
 import { evoStore } from '../../core/evoappDataStore';
-import { readLegacyEvoTransactions } from '../../core/data/legacyEvoTransactions';
 import { taxPaymentMapper } from '../../core/mappers/taxPaymentMapper';
-import type { EvoTransaction } from '../../core/domain/evo-transaction';
 import type { TaxPayment, MonthlyTaxSummary } from './types';
 import {
     getCurrentYear,
@@ -43,37 +41,10 @@ export function useTaxSummary(year: number = getCurrentYear()): TaxSummary {
 
                 if (canonicalPayments.length > 0) {
                     allPayments = canonicalPayments.map(taxPaymentMapper.toLegacy);
-                } else {
-                    // 2. Migration: Try loading from evo-transactions
-                    const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
-
-                    let transactions: EvoTransaction[] = [];
-                    if (records.length > 0) {
-                        // records[0] is the payload { transactions: ... }
-                        transactions = records[0].transactions || [];
-                    }
-
-                    // Map to TaxPayment
-                    const legacyPayments: TaxPayment[] = transactions
-                        .filter(t => t.type === 'impuesto')
-                        .map(t => ({
-                            id: t.id,
-                            date: t.date,
-                            concept: t.concept,
-                            amount: t.amount,
-                            type: (t.metadata?.taxType as any) || 'Other',
-                            status: 'Paid',
-                            metadata: t.metadata
-                        }));
-
-                    if (legacyPayments.length > 0) {
-                        console.log(`Migrating ${legacyPayments.length} tax payments to canonical store...`);
-                        // Save to new store
-                        const canonicals = legacyPayments.map(taxPaymentMapper.toCanonical);
-                        await evoStore.pagosImpuestos.saveAll(canonicals);
-                        allPayments = legacyPayments;
-                    }
                 }
+
+                // Legacy Migration handled by MigrationService. 
+                // We rely on canonical data only.
 
                 if (!isMounted) return;
 

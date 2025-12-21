@@ -1,11 +1,13 @@
-import { Database, Trash2, Upload, Palette, Cloud, RefreshCw, ExternalLink, ShieldCheck, AlertCircle, HardDrive } from 'lucide-react';
+import { Database, Trash2, Upload, Palette, Cloud, RefreshCw, ExternalLink, ShieldCheck, AlertCircle, HardDrive, Calculator } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { dataStore } from '../core/data/dataStore';
 import { useSync } from '../modules/core/sync/SyncProvider';
+import { useProfiles } from '../modules/core/profiles/ProfileProvider';
 
 
 export function Settings() {
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const { activeProfile, updateProfile } = useProfiles();
     const {
         isDriveConnected,
         driveUser,
@@ -48,6 +50,122 @@ export function Settings() {
                     <h1 className="text-2xl font-semibold tracking-tight text-slate-50">Ajustes</h1>
                     <p className="text-sm text-slate-400">Administra la apariencia, datos y copias de seguridad.</p>
                 </div>
+
+                {/* Section: Fiscal Profile */}
+                <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-black/40 p-5 flex flex-col gap-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/50">
+                    <div className="flex flex-col gap-2 border-b border-slate-800/50 pb-4">
+                        <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+                            <Calculator className="h-5 w-5" />
+                            <h2>Perfil Fiscal</h2>
+                        </div>
+                        <p className="text-sm text-slate-400">Configura tu régimen y año fiscal para los cálculos de impuestos.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* Regimen */}
+                        <div className="space-y-2">
+                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Régimen Fiscal</label>
+                            <select
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                                value={activeProfile.taxRegime || ''}
+                                onChange={(e) => {
+                                    const val = e.target.value as 'PM' | 'PF_RESICO' | '';
+                                    if (val) updateProfile({ ...activeProfile, taxRegime: val });
+                                }}
+                            >
+                                <option value="" disabled>Seleccionar...</option>
+                                <option value="PF_RESICO">Persona Física (RESICO)</option>
+                                <option value="PM">Persona Moral</option>
+                            </select>
+                        </div>
+
+                        {/* Tax Year */}
+                        <div className="space-y-2">
+                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Año Fiscal</label>
+                            <select
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                                value={activeProfile.taxYear || new Date().getFullYear()}
+                                onChange={(e) => {
+                                    const val = parseInt(e.target.value);
+                                    updateProfile({ ...activeProfile, taxYear: val });
+                                }}
+                            >
+                                {[2023, 2024, 2025, 2026].map(y => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Periodicity */}
+                        <div className="space-y-2">
+                            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Periodicidad</label>
+                            <input
+                                type="text"
+                                className="w-full bg-slate-950/50 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-400 cursor-not-allowed"
+                                value="Mensual"
+                                disabled
+                            />
+                            <p className="text-[10px] text-slate-500">Fijo para este régimen.</p>
+                        </div>
+                    </div>
+                </section>
+
+                {/* Experimental Features */}
+                <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-black/40 p-5 flex flex-col gap-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/50">
+                    <div className="flex flex-col gap-2 border-b border-slate-800/50 pb-4">
+                        <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-amber-500/90">
+                            <AlertCircle className="h-5 w-5" />
+                            <h2>Funcionalidades Beta (Experimental)</h2>
+                        </div>
+                        <p className="text-sm text-slate-400">Activa características en desarrollo. Pueden cambiar sin previo aviso.</p>
+                    </div>
+
+                    <div className="bg-amber-500/5 border border-amber-500/10 rounded-lg p-4 space-y-4">
+                        {/* Journey Toggle */}
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="text-sm font-medium text-slate-200">Journey V1 (Guiado)</div>
+                                <div className="text-xs text-slate-500">Activa el flujo paso a paso para Cierre Mensual.</div>
+                            </div>
+                            <button
+                                onClick={() => updateProfile({
+                                    ...activeProfile,
+                                    featureFlags: {
+                                        ...activeProfile.featureFlags,
+                                        journeyV1: !activeProfile.featureFlags?.journeyV1
+                                    }
+                                })}
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${activeProfile.featureFlags?.journeyV1 ? 'bg-amber-500' : 'bg-slate-700'
+                                    }`}
+                            >
+                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${activeProfile.featureFlags?.journeyV1 ? 'translate-x-[22px]' : 'translate-x-1'
+                                    }`} />
+                            </button>
+                        </div>
+
+                        {/* Tax Engine Toggle */}
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="text-sm font-medium text-slate-200">Motor Fiscal V1</div>
+                                <div className="text-xs text-slate-500">Habilita cálculo automático de impuestos estimados.</div>
+                            </div>
+                            <button
+                                onClick={() => updateProfile({
+                                    ...activeProfile,
+                                    featureFlags: {
+                                        ...activeProfile.featureFlags,
+                                        taxEngineV1: !activeProfile.featureFlags?.taxEngineV1
+                                    }
+                                })}
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${activeProfile.featureFlags?.taxEngineV1 ? 'bg-amber-500' : 'bg-slate-700'
+                                    }`}
+                            >
+                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${activeProfile.featureFlags?.taxEngineV1 ? 'translate-x-[22px]' : 'translate-x-1'
+                                    }`} />
+                            </button>
+                        </div>
+                    </div>
+                </section>
 
                 {/* Section 1: Appearance */}
                 <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-black/40 p-5 flex flex-col gap-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/50">

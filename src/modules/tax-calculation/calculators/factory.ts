@@ -1,4 +1,5 @@
 import type { TaxProfile } from '../../shared/taxProfile';
+import { isTaxEngineEnabled } from '../../../config/flags';
 import type { RegimenCalculator, BaseParams, TaxParams, BaseResult, TaxResult } from './types';
 import { PfResicoCalculator } from './PfResicoCalculator';
 import { PfActividadEmpresarialCalculator } from './PfActividadEmpresarialCalculator';
@@ -19,6 +20,9 @@ class StubCalculator implements RegimenCalculator {
 }
 
 export const getCalculatorForRegimen = (regimen?: TaxProfile['regimenFiscal']): RegimenCalculator => {
+    if (!isTaxEngineEnabled()) {
+        return new StubCalculator();
+    }
     switch (regimen) {
         case 'PF_RESICO':
             return new PfResicoCalculator();

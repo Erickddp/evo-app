@@ -265,69 +265,27 @@ export function getYearlySummary(movements: EvoTransaction[]): YearlySummary[] {
 // --- Data Store Helpers ---
 import { evoStore } from '../../core/evoappDataStore';
 import { ingresosMapper } from '../../core/mappers/ingresosMapper';
-import { dataStore } from '../../core/data/dataStore'; // Keep for legacy migration check
 import { evoEvents } from '../../core/events';
 
 export async function loadMovementsFromStore(): Promise<EvoTransaction[]> {
     try {
-        // 1. Try loading from NEW Unified Store (registros-financieros)
+        // Read strictly from canonical store (MigrationService handles legacy)
         const canonicalRecords = await evoStore.registrosFinancieros.getAll();
-
-        if (canonicalRecords.length > 0) {
-            // Map back to Legacy for UI compatibility
-            return canonicalRecords.map(ingresosMapper.toLegacy);
-        }
-
-        // 2. Fallback: Try loading from LEGACY store (ingresos-manager)
-        // The user explicitly requested fallback to 'ingresos-manager'.
-        // We also check 'evo-transactions' as a secondary migration source if needed, 
-        // but let's prioritize the specific request or just check both.
-        // For strict compliance with the prompt "If there are no canonical records, it falls back to the legacy snapshot... in dataStore",
-        // we will check 'ingresos-manager'.
-
-        console.log('No canonical data found, checking legacy Ingresos Manager data...');
-        const legacyRecords = await dataStore.listRecords<{ movements: any[] }>('ingresos-manager');
-
-        if (legacyRecords.length > 0) {
-            legacyRecords.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-            const legacyMovements = legacyRecords[0].payload.movements || [];
-
-            // Convert to EvoTransaction first
-            const migratedTransactions: EvoTransaction[] = legacyMovements.map((m: any) => ({
-                id: m.id || crypto.randomUUID(),
-                date: m.date,
-                concept: m.concept,
-                amount: Math.abs(m.amount),
-                type: m.type || (m.amount >= 0 ? 'ingreso' : 'gasto'),
-                source: 'legacy-migration'
-            }));
-
-            if (migratedTransactions.length > 0) {
-                // Save immediately to canonical store
-                const canonicals = migratedTransactions.map(ingresosMapper.toCanonical);
-                await evoStore.registrosFinancieros.saveAll(canonicals);
-                console.log(`Migrated ${migratedTransactions.length} legacy records to canonical store.`);
-                return migratedTransactions;
-            }
-        }
-
-        return [];
+        return canonicalRecords.map(ingresosMapper.toLegacy);
     } catch (e) {
-        console.error('Failed to load movements from dataStore', e);
+        console.error('Failed to load movements from store', e);
         return [];
     }
 }
 
 export async function saveSnapshot(transactions: EvoTransaction[]) {
     try {
-        // 1. Save to Unified Store (Canonical)
+        // Save to Unified Store (Canonical)
+        // This implicitly uses dataStore.setSnapshot now.
         const canonicals = transactions.map(ingresosMapper.toCanonical);
         await evoStore.registrosFinancieros.saveAll(canonicals);
 
-        // 2. Save to Legacy Store (Backward Compatibility)
-        await dataStore.saveRecord('ingresos-manager', { movements: transactions });
-
-        // 3. Emit Event
+        // Emit Event
         evoEvents.emit('finance:updated');
     } catch (e) {
         console.error('Failed to save snapshot', e);

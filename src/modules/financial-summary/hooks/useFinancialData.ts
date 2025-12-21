@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { evoEvents } from '../../../core/events';
-import { readLegacyEvoTransactions } from '../../../core/data/legacyEvoTransactions';
 import { evoStore } from '../../../core/evoappDataStore';
 import { type EvoTransaction } from '../../../core/domain/evo-transaction';
 import { normalizeMovements, type NormalizedMovement } from '../helpers';
@@ -22,18 +21,6 @@ export function useFinancialData() {
 
             if (canonicalRegistros.length > 0) {
                 // Convert to EvoTransaction-like structure for normalization
-                // Or we can just map directly to NormalizedMovement if we wanted, 
-                // but normalizeMovements helper expects EvoTransaction[].
-                // Let's adapt canonical to EvoTransaction as the helper expects it, or update helper.
-                // The helper normalizeMovements expects EvoTransaction[].
-                // Let's look at normalizeMovements implementation in helpers.ts:
-                // It checks t.type === 'ingreso' etc.
-                // Canonical 'RegistroFinanciero' has 'tipo': 'ingreso' | 'gasto', 'fecha', 'monto', ...
-
-                // It seems easier to just construct the EvoTransaction list to feed the helper
-                // or just manually push to normalized array.
-                // Given the helper logic is simple, maybe we can use it if we map.
-
                 canonicalRegistros.forEach(r => {
                     transactions.push({
                         id: r.id,
@@ -44,14 +31,9 @@ export function useFinancialData() {
                         source: r.origen
                     } as any);
                 });
-            } else {
-                // Fallback
-                const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
-                if (records.length > 0) {
-                    const txs = records[0].transactions || [];
-                    transactions.push(...txs);
-                }
             }
+            // Legacy Migration handled by MigrationService.
+            // No fallback to evo-transactions.
 
             // 2. Load Tax Payments
             const canonicalPagos = await evoStore.pagosImpuestos.getAll();

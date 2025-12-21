@@ -38,10 +38,10 @@ export function CfdiWidget() {
                 // 2. Load Legacy Last Run Info (for logs display only)
                 let lastRunDate: string | undefined;
                 try {
-                    const legacyLogs = await dataStore.listRecords<any>(STORAGE_KEYS.LEGACY.CFDI_VALIDATOR);
-                    if (legacyLogs.length > 0) {
-                        const latest = legacyLogs.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-                        lastRunDate = latest.createdAt;
+                    const latest = await dataStore.getSnapshot<any>(STORAGE_KEYS.LEGACY.CFDI_VALIDATOR);
+                    if (latest) {
+                        lastRunDate = latest.timestamp || (latest.createdAt /* if available in payload */);
+                        // If we stored timestamp in payload in handleProcess, use it.
                     }
                 } catch (e) {
                     console.warn('Could not load legacy CFDI logs', e);

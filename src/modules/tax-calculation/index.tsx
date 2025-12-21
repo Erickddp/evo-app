@@ -1,12 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Calculator, DollarSign, Calendar, TrendingUp, TrendingDown, AlertCircle, Save, CheckCircle, User, Edit2 } from 'lucide-react';
 import { evoStore } from '../../core/evoappDataStore';
-import { ingresosMapper } from '../../core/mappers/ingresosMapper';
-import { readLegacyEvoTransactions } from '../../core/data/legacyEvoTransactions';
-import { taxPaymentMapper } from '../../core/mappers/taxPaymentMapper';
 import { taxCalcMapper } from '../../core/mappers/taxCalcMapper';
 import type { RegistroFinanciero, PagoImpuesto } from '../../core/evoappDataModel';
-import { type EvoTransaction } from '../../core/domain/evo-transaction';
 import type { ToolDefinition } from '../shared/types';
 import { TaxProfileForm } from './components/TaxProfileForm';
 import { getCalculatorForRegimen } from './calculators/factory';
@@ -28,16 +24,7 @@ export const TaxCalculationModule: React.FC = () => {
                 let loadedRegistros = canonicalRegistros;
 
                 if (loadedRegistros.length === 0) {
-                    // Fallback/Migration check (lazy)
-                    const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
-                    if (records.length > 0) {
-                        const transactions = records[0].transactions || [];
-                        // We don't migrate here to avoid duplication if other modules did it.
-                        // Just map for display/calc
-                        loadedRegistros = transactions
-                            .filter((t: any) => t.type === 'ingreso' || t.type === 'gasto')
-                            .map(ingresosMapper.toCanonical);
-                    }
+                    // Legacy Migration handled by MigrationService.
                 }
                 setRegistros(loadedRegistros);
 
@@ -46,23 +33,7 @@ export const TaxCalculationModule: React.FC = () => {
                 let loadedPagos = canonicalPagos;
 
                 if (loadedPagos.length === 0) {
-                    // Fallback
-                    const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
-                    if (records.length > 0) {
-                        const transactions = records[0].transactions || [];
-                        loadedPagos = transactions
-                            .filter((t: any) => t.type === 'impuesto')
-                            .map((t: any) => ({
-                                id: t.id,
-                                date: t.date,
-                                concept: t.concept,
-                                amount: t.amount,
-                                type: (t.metadata?.taxType as any) || 'Other',
-                                status: 'Paid' as 'Paid',
-                                metadata: t.metadata
-                            }))
-                            .map(taxPaymentMapper.toCanonical);
-                    }
+                    // Legacy Migration handled by MigrationService.
                 }
                 setPagos(loadedPagos);
 

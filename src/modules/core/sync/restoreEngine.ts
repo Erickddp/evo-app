@@ -1,5 +1,6 @@
 import type { DriveClient } from './drive/driveClient';
 import { evoStore } from '../../../core/evoappDataStore';
+import { dataStore } from '../../../core/data/dataStore';
 
 export type RestoreProgress = {
     phase: "downloading" | "parsing" | "clearing" | "importing" | "finalizing";
@@ -52,6 +53,13 @@ export async function restoreFromBackupFile(params: {
             throw new Error(`Versión de backup no soportada: ${schemaVersion}`);
         }
 
+        // 4. Mark Migration/Restore as Complete to prevent merges
+        await dataStore.setSnapshot('system:migration', {
+            v1_complete: true,
+            restored_at: new Date().toISOString(),
+            source: 'restore-v2'
+        });
+
         onProgress({ phase: 'finalizing', percent: 100, message: '¡Completado!' });
 
     } catch (err) {
@@ -87,7 +95,8 @@ async function restoreV1(payload: any, onProgress: (p: RestoreProgress) => void,
 
 async function restoreManifestBased(manifest: any, drive: DriveClient, onProgress: (p: RestoreProgress) => void, signal?: AbortSignal) {
     onProgress({ phase: 'clearing', percent: 10, message: 'Limpiando base de datos...' });
-    await evoStore.clearAll();
+    // Wipe physically to ensure no legacy artifacts remain
+    await dataStore.wipeAllRecords();
 
     const stores = manifest.stores || [];
     const totalStores = stores.length;

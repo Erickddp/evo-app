@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { DollarSign, Plus, Trash2, Download, Search, Filter, X } from 'lucide-react';
 import type { ToolDefinition } from '../shared/types';
 import { type EvoTransaction, createEvoTransaction, calculateTotals } from '../../core/domain/evo-transaction';
@@ -37,6 +37,11 @@ export const IngresosManagerTool: React.FC = () => {
     const [movements, setMovements] = useState<EvoTransaction[]>([]);
     const [isLoaded, setIsLoaded] = useState(false);
 
+    // Refs to control Hydration vs User Action vs Remote Update
+    const isHydratingRef = useRef(true);
+    const isSavingRef = useRef(false);
+    const dirtyRef = useRef(false);
+
     // Form State
     const [date, setDate] = useState<string>(todayAsIso());
     const [concept, setConcept] = useState('');
@@ -54,18 +59,28 @@ export const IngresosManagerTool: React.FC = () => {
     // Load initial data
     useEffect(() => {
         const load = () => {
+            isHydratingRef.current = true;
             loadMovementsFromStore().then(data => {
                 setMovements(data);
                 setIsLoaded(true);
+                // Mark hydration as done in the next tick loop logic or use effect?
+                // Actually, since setMovements triggers re-render, the next effect run will see isHydrating=true
+                // if we don't clear it. But we want to clear it AFTER the effect check would have fired.
+                // However, dirtyRef is false, so it doesn't matter.
+                // We'll set it false here so future edits work.
+                isHydratingRef.current = false;
             });
         };
 
         load();
 
         const handleDataChanged = () => {
-            setIsLoaded(false);
-            setMovements([]);
-            load();
+            // If we are currently saving, ignore the event we just emitted
+            if (isSavingRef.current) return;
+
+            // Reload data without full reset to avoid flicker
+            // We use queueMicrotask to ensure we don't conflict with current render
+            queueMicrotask(() => load());
         };
 
         evoEvents.on('data:changed', handleDataChanged);
@@ -73,10 +88,21 @@ export const IngresosManagerTool: React.FC = () => {
     }, []);
 
     // Persist whenever movements change (only after initial load)
+    // Persist whenever movements change (only after initial load AND if dirty)
     useEffect(() => {
-        if (isLoaded) {
-            void saveSnapshot(movements);
-        }
+        const save = async () => {
+            if (isLoaded && !isHydratingRef.current && dirtyRef.current && !isSavingRef.current) {
+                try {
+                    isSavingRef.current = true;
+                    // console.log('Saving snapshot...');
+                    await saveSnapshot(movements);
+                    dirtyRef.current = false;
+                } finally {
+                    isSavingRef.current = false;
+                }
+            }
+        };
+        void save();
     }, [movements, isLoaded]);
 
     // Available Years for Dropdown
@@ -139,7 +165,10 @@ export const IngresosManagerTool: React.FC = () => {
                 source: 'manual'
             });
 
-            setMovements((prev) => [newMovement, ...prev]);
+            setMovements((prev) => {
+                dirtyRef.current = true;
+                return [newMovement, ...prev];
+            });
 
             // Reset form but keep date and type
             setConcept('');
@@ -154,6 +183,7 @@ export const IngresosManagerTool: React.FC = () => {
     };
 
     const handleDelete = (id: string) => {
+        dirtyRef.current = true;
         setMovements((prev) => prev.filter((m) => m.id !== id));
     };
 
@@ -230,6 +260,7 @@ export const IngresosManagerTool: React.FC = () => {
                 } else if (result.movements.length === 0) {
                     alert('El archivo parece estar vacío o no tiene formato válido.');
                 } else {
+                    dirtyRef.current = true;
                     setMovements(prev => [...prev, ...result.movements]);
                     let msg = `Se importaron ${result.stats.imported} de ${result.stats.totalRows} filas.`;
                     if (result.stats.ignored > 0) msg += `\n${result.stats.ignored} filas ignoradas.`;

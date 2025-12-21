@@ -1,13 +1,34 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { toolsRegistry } from '../modules/registry';
 import { ErrorBoundary } from '../core/errors/ErrorBoundary';
 import { ToolsSidebar } from '../components/ToolsSidebar';
 import { Menu } from 'lucide-react';
+import { ToolHeaderSignals } from '../modules/core/data-provider/ToolHeaderSignals';
 
 export function ToolsHub() {
-  const [selectedToolId, setSelectedToolId] = useState<string | null>(() => {
-    return localStorage.getItem('evorix-selected-tool');
-  });
+  const navigate = useNavigate();
+  const { toolId } = useParams<{ toolId: string }>();
+
+  // Use URL param as source of truth for selected tool
+  const selectedToolId = toolId || null;
+
+  // Restore last used tool if visiting /tools root?
+  // User might prefer clean state or last state.
+  // Prompt says "Eliminar dependencia de ToolHub state-only".
+  // Let's rely on URL. If root, show "Select Tool" or redirect to last?
+  // Simplest: If root, show empty. 
+  // But for better UX, if no param but localStorage has value, maybe redirect?
+  // Let's implement redirect check in useEffect.
+
+  useEffect(() => {
+    if (!selectedToolId) {
+      const last = localStorage.getItem('evorix-selected-tool');
+      if (last) {
+        navigate(`/tools/${last}`, { replace: true });
+      }
+    }
+  }, [selectedToolId, navigate]);
 
   // State for sidebar collapse. Defaults to collapsed on mobile, expanded on desktop.
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
@@ -26,7 +47,7 @@ export function ToolsHub() {
   }, [selectedToolId]);
 
   const handleSelectTool = (id: string) => {
-    setSelectedToolId(id);
+    navigate(`/tools/${id}`);
     // Auto-collapse sidebar when a tool is selected ONLY on mobile
     if (window.innerWidth < 768) {
       setIsSidebarCollapsed(true);
@@ -71,9 +92,14 @@ export function ToolsHub() {
                 </span>
               </div>
             </div>
+
+
             <div className="flex-1 overflow-auto p-6 relative">
+              <ToolHeaderSignals currentToolId={selectedTool.meta.id} />
+
               <ErrorBoundary
                 key={selectedTool.meta.id}
+                // ...
                 fallback={
                   <div className="p-6 text-center">
                     <div className="text-red-500 mb-2">⚠️ Tool Crashed</div>
