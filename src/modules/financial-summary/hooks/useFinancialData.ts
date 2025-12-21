@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { evoEvents } from '../../../core/events';
 import { readLegacyEvoTransactions } from '../../../core/data/legacyEvoTransactions';
 import { evoStore } from '../../../core/evoappDataStore';
 import { type EvoTransaction } from '../../../core/domain/evo-transaction';
@@ -86,6 +87,17 @@ export function useFinancialData() {
 
     useEffect(() => {
         loadData();
+
+        const handleDataChanged = async () => {
+            setLoading(true);
+            setAllMovements([]);
+            await loadData();
+        };
+
+        evoEvents.on('data:changed', handleDataChanged);
+        return () => {
+            evoEvents.off('data:changed', handleDataChanged);
+        };
     }, []);
 
     return {

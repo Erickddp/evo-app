@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { evoEvents } from '../../core/events';
 import { evoStore } from '../../core/evoappDataStore';
 import { readLegacyEvoTransactions } from '../../core/data/legacyEvoTransactions';
 import { taxPaymentMapper } from '../../core/mappers/taxPaymentMapper';
@@ -103,7 +104,18 @@ export function useTaxSummary(year: number = getCurrentYear()): TaxSummary {
         }
 
         load();
-        return () => { isMounted = false; };
+
+        const handleDataChanged = () => {
+            setSummary(s => ({ ...s, loading: true, monthlySummary: [], totalYear: 0, totalIVA: 0, lastPayment: null }));
+            load();
+        };
+
+        evoEvents.on('data:changed', handleDataChanged);
+
+        return () => {
+            isMounted = false;
+            evoEvents.off('data:changed', handleDataChanged);
+        };
     }, [year]);
 
     return summary;

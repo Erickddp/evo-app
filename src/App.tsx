@@ -10,6 +10,7 @@ import { ToolsHub } from './routes/ToolsHub';
 import { Settings } from './routes/Settings';
 
 import { ProfileProvider } from './modules/core/profiles/ProfileProvider';
+import { DriveFabMenu } from './modules/backups/components/DriveFabMenu';
 
 function App() {
   return (
@@ -25,6 +26,8 @@ function App() {
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Routes>
+            {/* Global Google Drive FAB - Renders into body via Portal */}
+            <DriveFabMenu />
           </BrowserRouter>
         </SyncProvider>
       </ProfileProvider>

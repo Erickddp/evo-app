@@ -2,7 +2,7 @@ import { Database, Trash2, Upload, Palette, Cloud, RefreshCw, ExternalLink, Shie
 import { useRef, useState } from 'react';
 import { dataStore } from '../core/data/dataStore';
 import { useSync } from '../modules/core/sync/SyncProvider';
-import { DriveFabMenu } from '../modules/backups/components/DriveFabMenu';
+
 
 export function Settings() {
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -137,8 +137,8 @@ export function Settings() {
                             {/* Status Badge */}
                             <div className="shrink-0">
                                 <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold tracking-wide uppercase border ${isDriveConnected
-                                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                    : 'bg-slate-800 text-slate-400 border-slate-700'
                                     }`}>
                                     {isDriveConnected ? 'Conectado' : 'No conectado'}
                                 </span>
@@ -235,7 +235,7 @@ export function Settings() {
                     </div>
                 </section>
 
-                <DriveFabMenu />
+
 
                 {/* Section 3: Local Storage */}
                 <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-black/40 p-5 flex flex-col gap-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/50">

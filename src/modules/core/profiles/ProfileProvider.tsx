@@ -15,6 +15,8 @@ interface ProfileContextValue {
     pendingProfileId: string | null;
     resolvePendingSwitch: (shouldSave: boolean) => Promise<void>;
     cancelPendingSwitch: () => void;
+    justCreatedProfileId: string | null;
+    clearNewProfileWelcome: () => void;
 }
 
 const ProfileContext = createContext<ProfileContextValue | null>(null);
@@ -23,6 +25,7 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const [profiles, setProfiles] = useState<EvoProfile[]>([]);
     const [activeProfile, setActiveProfile] = useState<EvoProfile>(profileStore.list()[0]);
+    const [justCreatedProfileId, setJustCreatedProfileId] = useState<string | null>(null);
 
     // Initial Load
     useEffect(() => {
@@ -52,6 +55,7 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         profileStore.upsert(newProfile);
         setProfiles(profileStore.list());
+        setJustCreatedProfileId(id);
     };
 
     const switchProfile = async (profileId: string): Promise<boolean> => {
@@ -107,7 +111,10 @@ export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ child
             showUnsavedModal: false,
             pendingProfileId: null,
             resolvePendingSwitch: async () => { },
-            cancelPendingSwitch: () => { }
+            cancelPendingSwitch: () => { },
+            // New Onboarding
+            justCreatedProfileId,
+            clearNewProfileWelcome: () => setJustCreatedProfileId(null)
         }}>
             {children}
         </ProfileContext.Provider>

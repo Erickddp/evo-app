@@ -148,6 +148,17 @@ export function useFacturas() {
 
     useEffect(() => {
         loadData();
+
+        const handleDataChanged = () => {
+            setLoading(true);
+            setClients([]);
+            setInvoices([]);
+            setCurrentPage(1);
+            loadData();
+        };
+
+        evoEvents.on('data:changed', handleDataChanged);
+        return () => evoEvents.off('data:changed', handleDataChanged);
     }, [loadData]);
 
     const saveClient = async (client: Client) => {

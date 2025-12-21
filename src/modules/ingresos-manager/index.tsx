@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { DollarSign, Plus, Trash2, Download, Search, Filter, X } from 'lucide-react';
 import type { ToolDefinition } from '../shared/types';
 import { type EvoTransaction, createEvoTransaction, calculateTotals } from '../../core/domain/evo-transaction';
+import { evoEvents } from '../../core/events';
 import { parseIngresosCsv, loadMovementsFromStore, saveSnapshot, getYear } from './utils';
 import { AnalyticsPanel } from './AnalyticsPanel';
 
@@ -52,10 +53,23 @@ export const IngresosManagerTool: React.FC = () => {
 
     // Load initial data
     useEffect(() => {
-        loadMovementsFromStore().then(data => {
-            setMovements(data);
-            setIsLoaded(true);
-        });
+        const load = () => {
+            loadMovementsFromStore().then(data => {
+                setMovements(data);
+                setIsLoaded(true);
+            });
+        };
+
+        load();
+
+        const handleDataChanged = () => {
+            setIsLoaded(false);
+            setMovements([]);
+            load();
+        };
+
+        evoEvents.on('data:changed', handleDataChanged);
+        return () => evoEvents.off('data:changed', handleDataChanged);
     }, []);
 
     // Persist whenever movements change (only after initial load)

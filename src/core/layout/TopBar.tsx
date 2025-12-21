@@ -1,5 +1,6 @@
 import { Moon, Sun, Menu } from 'lucide-react';
 import { useTheme } from '../theme/ThemeProvider';
+import { useProfile } from '../../modules/core/profiles/ProfileProvider';
 
 interface TopBarProps {
     toggleSidebar: () => void;
@@ -7,6 +8,7 @@ interface TopBarProps {
 
 export function TopBar({ toggleSidebar }: TopBarProps) {
     const { resolvedTheme, toggleTheme } = useTheme();
+    const { activeProfile } = useProfile();
 
     return (
         <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-6 transition-colors duration-200">
@@ -19,8 +21,8 @@ export function TopBar({ toggleSidebar }: TopBarProps) {
                     <Menu size={24} />
                 </button>
 
-                <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200">
-                    Bienvenido de nuevo
+                <h2 className="text-lg font-semibold tracking-tight text-gray-800 dark:text-gray-100">
+                    {activeProfile?.name || 'EVOAPP'}
                 </h2>
             </div>
 
