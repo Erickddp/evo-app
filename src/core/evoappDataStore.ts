@@ -54,7 +54,18 @@ class EntityStore<T extends { id: string }> {
         // Save directly as snapshot. 
         // Logic for append-only history is NOT here anymore (user requested current-state focused).
         // If history is needed, the DataStore could handle it internally or we use a separate 'archive' method.
-        await dataStore.setSnapshot(this.entityType, items);
+
+        // GATEKEEPER: Ensure data integrity for RegistroFinanciero
+        let validItems = items;
+        if (this.entityType === 'registros-financieros') {
+            validItems = items.map(item => normalizeRegistroGatekeeper(item)).filter(item => item !== null) as unknown as T[];
+
+            if (validItems.length < items.length && import.meta.env.DEV) {
+                console.warn(`[EvoStore] Filtered ${items.length - validItems.length} invalid registros-financieros.`);
+            }
+        }
+
+        await dataStore.setSnapshot(this.entityType, validItems);
         evoEvents.emit('data:changed');
     }
 
@@ -115,6 +126,11 @@ class EntityStore<T extends { id: string }> {
         // Let's use Map for ID dedup.
         const map = new Map<string, T>();
         for (const item of currentItems) map.set(item.id, item);
+
+        // Gatekeeper logic inside saveAll will handle normalization during persistence,
+        // but we should ideally normalize BEFORE merging to correctly dedup by ID if normalization changes ID (unlikely)
+        // or just rely on saveAll. Relying on saveAll is safer as it covers all paths.
+
         for (const item of newItems) map.set(item.id, item);
 
         await this.saveAll(Array.from(map.values()));
@@ -210,3 +226,128 @@ export const evoStore = {
         evoEvents.emit('data:changed');
     }
 };
+
+/**
+ * Normalizes any input into a robust RegistroFinanciero or returns null if invalid.
+ * Used as a Gatekeeper before persistence.
+ */
+function normalizeRegistroGatekeeper(input: any): RegistroFinanciero | null {
+    if (!input || typeof input !== 'object') return null;
+
+    // 1. ID
+    const id = input.id;
+    if (!id || typeof id !== 'string') return null;
+
+    // 2. DATE
+    // Accept: date, fecha, Date, timestamp
+    let dateStr: string | null = null;
+    const rawDate = input.date || input.fecha;
+
+    try {
+        if (rawDate instanceof Date) {
+            dateStr = rawDate.toISOString().split('T')[0];
+        } else if (typeof rawDate === 'number') {
+            dateStr = new Date(rawDate).toISOString().split('T')[0];
+        } else if (typeof rawDate === 'string') {
+            // Check if YYYY-MM-DD
+            if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+                dateStr = rawDate;
+            } else {
+                // Try parse
+                const d = new Date(rawDate);
+                if (!isNaN(d.getTime())) {
+                    dateStr = d.toISOString().split('T')[0];
+                }
+            }
+        }
+    } catch {
+        // invalid date
+    }
+
+    if (!dateStr) return null; // Date is required
+
+    // 3. AMOUNT
+    // Accept: amount, monto
+    let amount = parseFloat(input.amount);
+    if (isNaN(amount)) {
+        amount = parseFloat(input.monto);
+    }
+    if (isNaN(amount)) return null; // Amount is required
+    const absAmount = Math.abs(amount);
+
+    // 4. TYPE
+    // Accept: type, tipo
+    // Values: 'ingreso', 'gasto', 'impuesto'
+    let type = input.type || input.tipo;
+
+    // Normalize English map if passed
+    if (type === 'income') type = 'ingreso';
+    if (type === 'expense') type = 'gasto';
+    if (type === 'tax') type = 'impuesto';
+
+    // Inference by sign if missing or invalid
+    if (type !== 'ingreso' && type !== 'gasto' && type !== 'impuesto') {
+        if (amount < 0) {
+            type = 'gasto';
+        } else {
+            // Default to ingreso? Or require type?
+            // Existing logic often defaults to ingreso for positive if unknown, but better to be safe.
+            // Let's assume positive unknown is income.
+            type = 'ingreso';
+        }
+    }
+
+    // 5. SOURCE
+    // Whitelist
+    let source = input.source || input.origen;
+    const validSources = ['manual', 'cfdi', 'bank', 'migration', 'tax'];
+    if (!validSources.includes(source)) {
+        source = 'manual';
+    }
+
+    // 6. METADATA & CONCEPT
+    // Preserve concept
+    const concept = input.concept || input.concepto || input.metadata?.concept || 'Sin concepto';
+
+    // Merge metadata
+    const metadata = {
+        ...(input.metadata || {}),
+        concept, // Ensure concept is in metadata as well if needed by consumers, but 'concept' is not top-level property on interface? 
+        // Wait, User added 'concept' to types.ts in Step 801. So we should use it top-level!
+    };
+
+
+    // Construct Canonical
+    // CAREFUL: Matches Interface `RegistroFinanciero` exactly
+    // In Step 801, user added `concept` to `types.ts`.
+
+    const registro: RegistroFinanciero = {
+        id,
+        date: dateStr,
+        amount: absAmount, // Always store positive? Types says "Always positive, type determines flow".
+        type: type as 'ingreso' | 'gasto' | 'impuesto',
+        source: source as 'manual' | 'cfdi' | 'bank' | 'tax', // 'migration' maps to manual or we add migration to types? 
+        // Let's cast to any or map migration to manual. 
+        // User said "whitelist: manual, cfdi, bank, migration".
+        // Types usually restrict source. Let's map migration -> manual to be safe for strict consumers.
+        taxability: input.taxability || 'unknown',
+        // New field from Step 801
+        concept: concept,
+
+        metadata,
+
+        links: input.links || {},
+
+        // Timestamps
+        createdAt: input.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+    };
+
+    // Fix source strictness if needed. 'migration' might not be in the enum defined in types.ts
+    if (source === 'migration') {
+        registro.source = 'manual';
+        registro.metadata.originalSource = 'migration';
+    }
+
+    return registro;
+}
