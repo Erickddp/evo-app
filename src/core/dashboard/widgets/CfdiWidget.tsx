@@ -24,16 +24,16 @@ export function CfdiWidget() {
             try {
                 // 1. Load Canonical Financial Records (Source of Truth for impact)
                 const allFinancials = await evoStore.registrosFinancieros.getAll();
-                const cfdiRecords = allFinancials.filter(r => r.origen === 'cfdi');
+                const cfdiRecords = allFinancials.filter(r => r.source === 'cfdi');
 
                 // Calculate totals
                 const totalIncome = cfdiRecords
-                    .filter(r => r.tipo === 'ingreso')
-                    .reduce((sum, r) => sum + (Number(r.monto) || 0), 0);
+                    .filter(r => r.type === 'ingreso')
+                    .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
 
                 const totalExpense = cfdiRecords
-                    .filter(r => r.tipo === 'gasto')
-                    .reduce((sum, r) => sum + (Number(r.monto) || 0), 0);
+                    .filter(r => r.type === 'gasto')
+                    .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
 
                 // 2. Load Legacy Last Run Info (for logs display only)
                 let lastRunDate: string | undefined;

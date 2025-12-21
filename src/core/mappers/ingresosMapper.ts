@@ -16,13 +16,14 @@ export const ingresosMapper = {
         return {
             id: tx.id,
             date: tx.date,
+            concept: tx.concept || 'Sin concepto',
             amount: tx.amount,
             type: tx.type === 'ingreso' ? 'ingreso' : 'gasto',
             source: source,
             taxability: 'unknown',
             links: {},
             metadata: {
-                concept: tx.concept, // Preserved here
+                // concept: tx.concept, // Moved to root
                 originalSource: tx.source, // Keep original specific source
                 referenciaId: tx.metadata?.referenciaId,
                 categoria: tx.category,

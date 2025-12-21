@@ -27,6 +27,9 @@ export interface RegistroFinanciero {
     /** ISO 8601 Date String */
     date: string;
 
+    /** Description or Concept of the movement */
+    concept: string;
+
     /** Monetary amount (always positive, type determines flow) */
     amount: number;
 

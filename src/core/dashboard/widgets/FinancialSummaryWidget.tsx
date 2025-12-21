@@ -36,12 +36,12 @@ export function FinancialSummaryWidget() {
 
                 movements.forEach(m => {
                     // Ensure we handle amounts as numbers
-                    const amt = Number(m.monto) || 0;
+                    const amt = Number(m.amount) || 0;
 
-                    if (m.tipo === 'ingreso') {
+                    if (m.type === 'ingreso') {
                         totalIncome += amt;
                         count++;
-                    } else if (m.tipo === 'gasto') {
+                    } else if (m.type === 'gasto') {
                         totalExpense += amt;
                         count++;
                     }

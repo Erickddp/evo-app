@@ -1,5 +1,5 @@
 import { evoStore } from '../../../core/evoappDataStore';
-import type { JourneyState, JourneyStep } from '../../../core/evoappDataModel';
+import type { JourneyState } from '../../../core/evoappDataModel';
 
 const JOURNEY_ID = 'monthly-close';
 

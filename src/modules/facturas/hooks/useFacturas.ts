@@ -163,8 +163,8 @@ export function useFacturas() {
             const allTransactions = await evoStore.registrosFinancieros.getAll();
 
             // Find existing transaction for this invoice (using referenceId which maps to metadata.invoiceId in legacy)
-            // In canonical model: referenciaId
-            const existingIndex = allTransactions.findIndex(t => t.referenciaId === invoice.id);
+            // In canonical model: links.facturaId
+            const existingIndex = allTransactions.findIndex(t => t.links?.facturaId === invoice.id);
 
             const transactionData = {
                 date: invoice.invoiceDate,
@@ -189,7 +189,7 @@ export function useFacturas() {
             // Map to canonical
             const canonicalTx = ingresosMapper.toCanonical(legacyTx);
             // Ensure referenciaId is set (mapper might look at metadata.referenciaId, but here we set it explicitly if needed)
-            canonicalTx.referenciaId = invoice.id;
+            canonicalTx.links = { ...canonicalTx.links, facturaId: invoice.id };
 
             // Save
             await evoStore.registrosFinancieros.add(canonicalTx);
@@ -212,7 +212,7 @@ export function useFacturas() {
 
             // 2. Delete linked transaction from RegistrosFinancieros
             const allTransactions = await evoStore.registrosFinancieros.getAll();
-            const linkedTx = allTransactions.find(t => t.referenciaId === invoiceId);
+            const linkedTx = allTransactions.find(t => t.links?.facturaId === invoiceId);
 
             if (linkedTx) {
                 await evoStore.registrosFinancieros.delete(linkedTx.id);
@@ -241,7 +241,7 @@ export function useFacturas() {
             // 2. Identify transaction IDs to delete (linked to invoices)
             const txIdsToDelete: string[] = [];
             allInvoices.forEach(inv => {
-                const tx = allTransactions.find(t => t.referenciaId === inv.id);
+                const tx = allTransactions.find(t => t.links?.facturaId === inv.id);
                 if (tx) txIdsToDelete.push(tx.id);
             });
 
@@ -571,7 +571,7 @@ export function useFacturas() {
                         // Create transaction via createEvoTransaction for ID generation
                         const tx = createEvoTransaction(transactionData);
                         const canonicalTx = ingresosMapper.toCanonical(tx);
-                        canonicalTx.referenciaId = inv.id; // ensure consistency
+                        canonicalTx.links = { ...canonicalTx.links, facturaId: inv.id }; // ensure consistency
                         newTransactions.push(canonicalTx);
                     });
 

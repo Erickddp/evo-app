@@ -15,7 +15,7 @@ export const dashboardDataProvider = {
         const { profile, registros } = context;
         const monthRecords = this.getMonthlyRecords(registros, month);
         const stats = this.computeStats(monthRecords);
-        const signals = this.computeSignals(stats, monthRecords);
+        const signals = this.computeSignals(stats);
 
         let taxSummary: DashboardTaxSummary | undefined;
 
@@ -54,11 +54,11 @@ export const dashboardDataProvider = {
         let cfdi = 0, bank = 0, manual = 0, tax = 0;
 
         for (const r of records) {
-            // Normalize fields (Legacy Support)
-            const type = r.type || (r as any).tipo;
-            const amount = r.amount || (r as any).monto || 0;
-            const taxability = r.taxability; // Legacy might not have this or used different enum
-            const source = r.source || (r as any).origen;
+            // Standardize fields (Canonical keys)
+            const type = r.type;
+            const amount = r.amount || 0;
+            const taxability = r.taxability;
+            const source = r.source;
 
             // Totals by Type
             if (type === 'ingreso') ingresosTotal += amount;
@@ -91,7 +91,7 @@ export const dashboardDataProvider = {
         };
     },
 
-    computeSignals(stats: DashboardStats, records?: RegistroFinanciero[]): DashboardSignals {
+    computeSignals(stats: DashboardStats): DashboardSignals {
         return {
             needsCfdiImport: stats.sourcesCount.cfdi === 0,
             needsBankImport: stats.sourcesCount.bank === 0,

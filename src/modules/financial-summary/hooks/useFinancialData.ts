@@ -24,11 +24,11 @@ export function useFinancialData() {
                 canonicalRegistros.forEach(r => {
                     transactions.push({
                         id: r.id,
-                        date: r.fecha,
-                        concept: r.concepto,
-                        amount: r.monto,
-                        type: r.tipo, // 'ingreso' | 'gasto' matches EvoTransaction type mostly
-                        source: r.origen
+                        date: r.date,
+                        concept: r.concept,
+                        amount: r.amount,
+                        type: r.type, // 'ingreso' | 'gasto' matches EvoTransaction type mostly
+                        source: r.source
                     } as any);
                 });
             }
