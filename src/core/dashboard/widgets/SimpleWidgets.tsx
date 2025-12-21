@@ -53,7 +53,7 @@ export function SystemStatusWidget() {
                     {isOk && (
                         <div className="flex items-center gap-1.5">
                             <CheckCircle2 size={12} className="text-emerald-500" />
-                            <span>Almacenamiento local inicializado.</span>
+                            <span>Almacenamiento en la nube inicializado.</span>
                         </div>
                     )}
                     {isError && (
