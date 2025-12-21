@@ -5,6 +5,8 @@ import type { EvoProfile } from '../../core/profiles/profileTypes';
 import type { RegistroFinanciero } from '../../core/financial/types';
 import { computeMonthly } from '../../tax/engine/TaxEngine';
 
+import { isInMonth } from '../utils/month';
+
 export const dashboardDataProvider = {
     getSnapshot(
         month: string,
@@ -38,11 +40,8 @@ export const dashboardDataProvider = {
     },
 
     getMonthlyRecords(registros: RegistroFinanciero[], month: string): RegistroFinanciero[] {
-        // Robust check? Assume ISO format YYYY-MM-DD
-        return registros.filter(r => {
-            if (!r.date || typeof r.date !== 'string') return false;
-            return r.date.startsWith(month);
-        });
+        // Use robust utility for filtering, checking both English and Spanish keys
+        return registros.filter(r => isInMonth(r.date || (r as any).fecha, month));
     },
 
     computeStats(records: RegistroFinanciero[]): DashboardStats {
@@ -55,25 +54,29 @@ export const dashboardDataProvider = {
         let cfdi = 0, bank = 0, manual = 0, tax = 0;
 
         for (const r of records) {
+            // Normalize fields (Legacy Support)
+            const type = r.type || (r as any).tipo;
+            const amount = r.amount || (r as any).monto || 0;
+            const taxability = r.taxability; // Legacy might not have this or used different enum
+            const source = r.source || (r as any).origen;
+
             // Totals by Type
-            if (r.type === 'ingreso') ingresosTotal += r.amount;
-            else if (r.type === 'gasto') gastosTotal += r.amount;
-            else if (r.type === 'impuesto') impuestosTotal += r.amount;
+            if (type === 'ingreso') ingresosTotal += amount;
+            else if (type === 'gasto') gastosTotal += amount;
+            else if (type === 'impuesto') impuestosTotal += amount;
 
             // Classification
-            if (r.taxability === 'unknown') unknownClassificationsCount++;
-            if (r.type === 'gasto') {
-                if (r.taxability === 'deducible') deduciblesTotal += r.amount;
-                if (r.taxability === 'no_deducible') noDeduciblesTotal += r.amount;
+            if (taxability === 'unknown') unknownClassificationsCount++;
+            if (type === 'gasto') {
+                if (taxability === 'deducible') deduciblesTotal += amount;
+                if (taxability === 'no_deducible') noDeduciblesTotal += amount;
             }
 
             // Sources
-            switch (r.source) {
-                case 'cfdi': cfdi++; break;
-                case 'bank': bank++; break;
-                case 'manual': manual++; break;
-                case 'tax': tax++; break;
-            }
+            if (source === 'cfdi') cfdi++;
+            else if (source === 'bank') bank++;
+            else if (source === 'tax') tax++;
+            else manual++; // Fallback: count anything else (manual, ingresos-manager, manual-csv) as manual
         }
 
         return {

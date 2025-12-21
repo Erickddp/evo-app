@@ -132,21 +132,20 @@ export function Dashboard() {
     // Feature Flag Check
     const journeyEnabled = isJourneyEnabled(activeProfile);
 
-    // Debug Logging (DEV only)
+    // Debug logging (DEV only)
     useEffect(() => {
-        if (import.meta.env.DEV) {
-            console.debug('[DASHBOARD] Debug Render', {
-                profileId: activeProfile?.id,
+        if (import.meta.env.DEV && snapshot) {
+            console.debug('[DASHBOARD] Telemetry', {
                 month,
-                journeyEnabled,
-                isLoading,
-                hasSnapshot: !!snapshot,
-                error: error?.message,
-                totalRecords: snapshot?.stats?.recordsCount,
-                signals: snapshot?.signals
+                totalRecords: snapshot.stats.recordsCount,
+                sources: snapshot.stats.sourcesCount,
+                signals: snapshot.signals,
+                // Deep dive into correctness:
+                // Check if we have 0 records but expect some?
+                hasData: snapshot.stats.recordsCount > 0
             });
         }
-    }, [month, snapshot, activeProfile, journeyEnabled, isLoading, error]);
+    }, [month, snapshot, activeProfile]);
 
     const [config, setConfig] = useState<DashboardConfig>(DEFAULT_DASHBOARD_CONFIG);
 
