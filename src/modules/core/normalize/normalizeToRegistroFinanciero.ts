@@ -59,7 +59,17 @@ export const normalizeToRegistroFinanciero = (
     const raw = input as Record<string, any>; // Basic shape assumption
     if (!raw || typeof raw !== 'object') {
         // Fallback for primitive or null
-        return createRecord({ id, date, amount, type, source, taxability, createdAt: now, updatedAt: now });
+        return createRecord({
+            id,
+            date,
+            amount,
+            type,
+            source,
+            taxability,
+            concept: resolveConcept(input, type),
+            createdAt: now,
+            updatedAt: now
+        });
     }
 
     // --- Heuristic 1: Bank Movement ---
@@ -129,11 +139,32 @@ export const normalizeToRegistroFinanciero = (
         taxability,
         links,
         metadata,
+        concept: resolveConcept(raw, type),
         createdAt: now,
         updatedAt: now,
         ...context // Allow overriding specific fields via context if needed, but risky? No, strict to interface.
     };
 };
+
+function resolveConcept(input: any, fallbackType: FinancialRecordType): string {
+    if (!input || typeof input !== 'object') {
+        return getFallbackConcept(fallbackType);
+    }
+    const candidate = input.concept || input.concepto || input.metadata?.concept || input.metadata?.concepto;
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return candidate;
+    }
+    return getFallbackConcept(fallbackType);
+}
+
+function getFallbackConcept(type: FinancialRecordType): string {
+    switch (type) {
+        case 'ingreso': return 'Ingreso';
+        case 'gasto': return 'Gasto';
+        case 'impuesto': return 'Impuesto';
+        default: return 'Movimiento';
+    }
+}
 
 function createRecord(base: RegistroFinanciero): RegistroFinanciero {
     return base;
