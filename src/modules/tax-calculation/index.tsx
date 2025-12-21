@@ -31,7 +31,7 @@ export const TaxCalculationModule: React.FC = () => {
                     // Fallback/Migration check (lazy)
                     const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
                     if (records.length > 0) {
-                        const transactions = records[0].payload.transactions || [];
+                        const transactions = records[0].transactions || [];
                         // We don't migrate here to avoid duplication if other modules did it.
                         // Just map for display/calc
                         loadedRegistros = transactions
@@ -49,7 +49,7 @@ export const TaxCalculationModule: React.FC = () => {
                     // Fallback
                     const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
                     if (records.length > 0) {
-                        const transactions = records[0].payload.transactions || [];
+                        const transactions = records[0].transactions || [];
                         loadedPagos = transactions
                             .filter((t: any) => t.type === 'impuesto')
                             .map((t: any) => ({

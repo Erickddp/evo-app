@@ -1,4 +1,4 @@
-import type { Invoice } from '../../types';
+import type { Invoice } from '../types';
 
 export type FolioSerie = 'A' | 'B' | 'C';
 
@@ -91,13 +91,10 @@ export function calculateNextFolio(
     const regex = new RegExp(`^${serie}-${suffix}(?:-(\\d+))?$`);
 
     let maxSuffix = 1;
-    let foundAny = false;
-
     invoices.forEach(inv => {
         const f = inv.folio.toUpperCase();
         const match = f.match(regex);
         if (match) {
-            foundAny = true;
             // match[1] is the suffix digit. If undefined, it represents "1" (the base)
             if (match[1]) {
                 const s = parseInt(match[1], 10);

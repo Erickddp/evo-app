@@ -52,7 +52,7 @@ export const TaxTrackerTool: React.FC = () => {
                     // We rely on hooks.ts or just check here too for robustness
                     const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
                     if (records.length > 0) {
-                        const transactions = records[0].payload.transactions || [];
+                        const transactions = records[0].transactions || [];
                         const legacyItems = transactions.filter((t: any) => t.type === 'impuesto');
                         if (legacyItems.length > 0) {
                             loadedPayments = legacyItems.map((t: any) => ({
@@ -81,7 +81,7 @@ export const TaxTrackerTool: React.FC = () => {
                     // Fallback to evo-transactions if migration hasn't happened
                     const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
                     if (records.length > 0) {
-                        loadedTransactions = records[0].payload.transactions || [];
+                        loadedTransactions = records[0].transactions || [];
                     }
                 }
                 setAllTransactions(loadedTransactions);

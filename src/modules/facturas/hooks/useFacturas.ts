@@ -19,6 +19,14 @@ import { evoEvents } from '../../../core/events';
 
 const TOOL_ID = 'facturas-manager';
 
+function fixMojibake(input: string): string {
+    try {
+        return decodeURIComponent(escape(input));
+    } catch {
+        return input;
+    }
+}
+
 export function useFacturas() {
     const [clients, setClients] = useState<Client[]>([]);
     const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -733,7 +741,12 @@ export function useFacturas() {
             console.log(`Reparing encoding in ${changes} records...`);
 
             // Save Clients
-            await evoStore.clientes.saveAll(updatedClients);
+            const normalizedClients = updatedClients.map(c => ({
+                ...c,
+                razonSocial: (c as any).razonSocial ?? c.name ?? '',
+                fechaRegistro: (c as any).fechaRegistro ?? c.createdAt ?? new Date().toISOString(),
+            }));
+            await evoStore.clientes.saveAll(normalizedClients);
             // Save Invoices
             await evoStore.facturas.saveAll(updatedInvoices.map(facturasMapper.invoiceToCanonical));
 

@@ -9,11 +9,12 @@ export interface EvorixDB extends DBSchema {
     };
 }
 
-const DB_NAME = 'evorix-db';
+const DEFAULT_DB_NAME = 'evorix-db';
 const DB_VERSION = 1;
 
-export async function initDB(): Promise<IDBPDatabase<EvorixDB>> {
-    return openDB<EvorixDB>(DB_NAME, DB_VERSION, {
+export async function initDB(dbNameOverride?: string): Promise<IDBPDatabase<EvorixDB>> {
+    const name = dbNameOverride || DEFAULT_DB_NAME;
+    return openDB<EvorixDB>(name, DB_VERSION, {
         upgrade(db) {
             if (!db.objectStoreNames.contains('records')) {
                 const store = db.createObjectStore('records', { keyPath: 'id' });

@@ -3,6 +3,7 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { useSidebarState } from './useSidebarState';
 import { PageTransition } from './PageTransition';
+import { SaveBar } from '../../modules/core/sync/SaveBar';
 
 export function MainLayout() {
     const { isCollapsed, isMobile, isMobileOpen, toggleSidebar, closeMobileSidebar } = useSidebarState();
@@ -28,6 +29,7 @@ export function MainLayout() {
                     </div>
                 </main>
             </div>
+            <SaveBar />
         </div>
     );
 }

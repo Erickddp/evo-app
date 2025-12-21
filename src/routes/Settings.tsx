@@ -1,9 +1,22 @@
 import { Shield, Database, Trash2, Info, Upload } from 'lucide-react';
 import { useRef } from 'react';
 import { dataStore } from '../core/data/dataStore';
+import { useSync } from '../modules/core/sync/SyncProvider';
+import { useProfile } from '../modules/core/profiles/ProfileProvider';
 
 export function Settings() {
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const {
+        isDriveConnected,
+        connectDrive,
+        saveNow,
+        openRestore,
+        isSaving,
+        isRestoring,
+        lastSavedAt,
+        lastError
+    } = useSync();
+    const { activeProfile } = useProfile();
 
     const handleClearData = async () => {
         if (window.confirm('¿Estás seguro de que deseas borrar todos los datos locales? Esta acción no se puede deshacer.')) {
@@ -26,6 +39,67 @@ export function Settings() {
                     <h1 className="text-2xl font-semibold tracking-tight text-slate-50">Ajustes</h1>
                     <p className="text-sm text-slate-400">Administra la apariencia, datos y copias de seguridad.</p>
                 </div>
+
+                {/* Google Drive Backup Section */}
+                <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-black/40 p-5 flex flex-col gap-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/50">
+                    <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+                        <Upload className="h-5 w-5" />
+                        <h2>Respaldo en Google Drive</h2>
+                    </div>
+
+                    <div className="p-4 rounded-lg bg-slate-950/50 border border-slate-800/50 space-y-4">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <p className="text-sm font-medium text-slate-200">
+                                    Perfil activo: <span className="text-blue-400">{activeProfile.name}</span>
+                                </p>
+                                <p className="text-xs text-slate-400 mt-1">
+                                    Los respaldos son privados en tu carpeta de aplicación de Google Drive.
+                                    {isDriveConnected ? ' (Conectado)' : ' (No conectado)'}
+                                </p>
+                            </div>
+
+                            <div className="flex gap-3">
+                                {!isDriveConnected ? (
+                                    <button
+                                        onClick={() => connectDrive()}
+                                        className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-colors"
+                                    >
+                                        Conectar Google Drive
+                                    </button>
+                                ) : (
+                                    <>
+                                        <button
+                                            onClick={() => saveNow()}
+                                            disabled={isSaving}
+                                            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
+                                        >
+                                            {isSaving ? 'Guardando...' : 'Respaldar ahora'}
+                                        </button>
+                                        <button
+                                            onClick={() => openRestore()}
+                                            disabled={isRestoring}
+                                            className="px-4 py-2 rounded-lg border border-slate-600 hover:bg-slate-800 text-slate-200 text-sm font-medium transition-colors disabled:opacity-50"
+                                        >
+                                            Abrir backups
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+
+                        {lastSavedAt && (
+                            <p className="text-xs text-slate-500">
+                                Último respaldo exitoso: {new Date(lastSavedAt).toLocaleString()}
+                            </p>
+                        )}
+                        {lastError && (
+                            <p className="text-xs text-red-400">
+                                {lastError}
+                            </p>
+                        )}
+                    </div>
+                </section>
 
                 {/* General Section */}
                 <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-xl shadow-lg shadow-black/40 p-5 flex flex-col gap-4 transition-transform transition-shadow duration-200 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/50">

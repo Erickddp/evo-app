@@ -1,5 +1,5 @@
 
-export type AppEvent = 'finance:updated' | 'invoice:updated';
+export type AppEvent = 'finance:updated' | 'invoice:updated' | 'data:changed';
 
 export const evoEvents = {
     emit: (event: AppEvent) => window.dispatchEvent(new CustomEvent(event)),

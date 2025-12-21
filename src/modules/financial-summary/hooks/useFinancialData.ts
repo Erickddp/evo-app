@@ -47,7 +47,7 @@ export function useFinancialData() {
                 // Fallback
                 const records = await readLegacyEvoTransactions<{ transactions: EvoTransaction[] }>();
                 if (records.length > 0) {
-                    const txs = records[0].payload.transactions || [];
+                    const txs = records[0].transactions || [];
                     transactions.push(...txs);
                 }
             }

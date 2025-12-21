@@ -48,8 +48,8 @@ export function useTaxSummary(year: number = getCurrentYear()): TaxSummary {
 
                     let transactions: EvoTransaction[] = [];
                     if (records.length > 0) {
-                        records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                        transactions = records[0].payload.transactions || [];
+                        // records[0] is the payload { transactions: ... }
+                        transactions = records[0].transactions || [];
                     }
 
                     // Map to TaxPayment

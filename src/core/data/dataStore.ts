@@ -23,6 +23,8 @@ export interface DataStore {
     exportAllAsCsv(): Promise<string>;
     exportToCSVBlob(): Promise<Blob>;
     importFromCsv(csvText: string, options?: { clearBefore?: boolean }): Promise<ImportResult>;
+    // Profile Support
+    switchProfile(dbPrefix: string): Promise<void>;
 }
 
 import { initDB, type EvorixDB } from './db';
@@ -32,10 +34,28 @@ const STORAGE_KEY = 'evorix-core-data';
 
 class IndexedDBDataStore implements DataStore {
     private dbPromise: Promise<IDBPDatabase<EvorixDB>>;
+    private currentDbName: string = 'evorix-db';
 
     constructor() {
-        this.dbPromise = initDB();
+        this.dbPromise = initDB(); // Default
         this.migrateFromLocalStorage();
+    }
+
+    async switchProfile(dbPrefix: string): Promise<void> {
+        // Construct new DB name
+        const dbName = dbPrefix === 'default' ? 'evorix-db' : `evorix-db-${dbPrefix}`;
+
+        if (this.currentDbName === dbName) return;
+
+        // Close current connection
+        const oldDb = await this.dbPromise;
+        oldDb.close();
+
+        // Open new connection
+        this.currentDbName = dbName;
+        this.dbPromise = initDB(dbName);
+
+        console.log(`Switched DataStore to ${dbName}`);
     }
 
     private async migrateFromLocalStorage() {

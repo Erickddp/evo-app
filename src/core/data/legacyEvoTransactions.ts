@@ -9,7 +9,7 @@ export async function readLegacyEvoTransactions<T>(): Promise<T[]> {
 
     try {
         const records = await dataStore.listRecords<T>(STORAGE_KEYS.LEGACY.EVO_TRANSACTIONS);
-        return records;
+        return records.map(r => r.payload);
     } catch (e) {
         console.warn('Failed to read legacy evo-transactions:', e);
         return [];
