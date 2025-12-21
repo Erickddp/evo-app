@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { evoEvents } from '../../../core/events';
-import { driveClient } from './drive/driveClient';
+import { driveClient, type DriveUser } from './drive/driveClient';
 import { buildBackupV2 } from './backupSerializer';
 import { restoreFromBackupFile, type RestoreProgress } from './restoreEngine';
 import { RestoreModal } from './RestoreModal';
@@ -26,13 +26,16 @@ interface SyncContextValue {
     isDriveConnected: boolean;
     driveStatus: DriveStatus;
     driveError?: string;
+    driveUser?: DriveUser;
     connectDrive: () => Promise<void>;
     // Restore
     openRestore: () => void;
     isRestoring: boolean;
     restoreProgress?: RestoreProgress;
     // Debug / Settings API
+    updateAccountStatus: () => Promise<void>;
     refreshBackups: () => Promise<void>;
+    lastUserRefreshAt?: number;
 }
 
 const SyncContext = createContext<SyncContextValue | null>(null);
@@ -51,6 +54,8 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Initialize status based on whether we have a token AND config
     const [driveStatus, setDriveStatus] = useState<DriveStatus>('disconnected');
     const [driveError, setDriveError] = useState<string | undefined>();
+    const [driveUser, setDriveUser] = useState<DriveUser | undefined>();
+    const [lastUserRefreshAt, setLastUserRefreshAt] = useState<number | undefined>();
 
     // Restore State
     const [isRestoreOpen, setIsRestoreOpen] = useState(false);
@@ -81,6 +86,18 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const markDirty = useCallback(() => setIsDirty(true), []);
     const markClean = useCallback(() => setIsDirty(false), []);
 
+    // Helper to fetch user info
+    const fetchDriveUser = useCallback(async () => {
+        try {
+            const user = await driveClient.getUserInfo();
+            setDriveUser(user);
+            setLastUserRefreshAt(Date.now());
+        } catch (e) {
+            console.error("Failed to fetch drive user info", e);
+            // Non-critical, just don't set user
+        }
+    }, []);
+
     // Initialization Effect
     const warnedMissingConfigRef = useRef(false);
 
@@ -109,11 +126,12 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (driveClient.isAuthenticated()) {
                 setIsDriveConnected(true);
                 setDriveStatus('connected');
+                fetchDriveUser();
             } else {
                 setDriveStatus('disconnected');
             }
         }
-    }, []);
+    }, [fetchDriveUser]);
 
     const connectDrive = useCallback(async () => {
         if (!hasGoogleClientId()) {
@@ -128,6 +146,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             await driveClient.signIn();
             setIsDriveConnected(true);
             setDriveStatus('connected');
+            fetchDriveUser();
         } catch (err: any) {
             console.error("Connect failed", err);
             const msg = err.message || "Error al conectar Google Drive";
@@ -144,7 +163,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 setDriveStatus('error');
             }
         }
-    }, []);
+    }, [fetchDriveUser]);
 
     const refreshBackups = useCallback(async () => {
         if (!driveClient.isAuthenticated()) return;
@@ -352,7 +371,10 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             isDriveConnected,
             driveStatus,
             driveError,
+            driveUser,
             connectDrive,
+            updateAccountStatus: fetchDriveUser,
+            lastUserRefreshAt,
             // Restore
             openRestore,
             isRestoring,

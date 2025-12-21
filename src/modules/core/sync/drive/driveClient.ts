@@ -11,6 +11,13 @@ export interface DriveClient {
     listAppDataFiles(prefix: string): Promise<Array<{ id: string; name: string; modifiedTime?: string }>>;
     listBackups(prefix?: string): Promise<Array<{ id: string; name: string; modifiedTime?: string; size?: number }>>;
     downloadFile(fileId: string): Promise<Blob>;
+    getUserInfo(): Promise<DriveUser>;
+}
+
+export interface DriveUser {
+    displayName: string;
+    emailAddress: string;
+    photoLink: string;
 }
 
 declare global {
@@ -215,6 +222,25 @@ class GoogleDriveClient implements DriveClient {
             { method: 'GET' }
         );
         return await res.blob();
+    }
+
+    async getUserInfo(): Promise<DriveUser> {
+        const res = await this.fetchWithAuth(
+            `https://www.googleapis.com/drive/v3/about?fields=user(displayName,emailAddress,photoLink)`,
+            { method: 'GET' }
+        );
+        const data = await res.json();
+
+        // Data format is { user: { displayName, ... } }
+        if (!data.user) {
+            throw new Error("No user info found in response");
+        }
+
+        return {
+            displayName: data.user.displayName,
+            emailAddress: data.user.emailAddress,
+            photoLink: data.user.photoLink
+        };
     }
 }
 

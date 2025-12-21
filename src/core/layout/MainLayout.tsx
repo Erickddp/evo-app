@@ -29,7 +29,9 @@ export function MainLayout() {
                     </div>
                 </main>
             </div>
-            <SaveBar />
+            {SHOW_LEGACY_SYNC_BAR && <SaveBar />}
         </div>
     );
 }
+
+const SHOW_LEGACY_SYNC_BAR = false;
