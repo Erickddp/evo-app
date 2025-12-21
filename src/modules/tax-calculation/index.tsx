@@ -76,16 +76,16 @@ export const TaxCalculationModule: React.FC = () => {
 
     const stats = useMemo(() => {
         // Filter by month
-        const periodRegistros = registros.filter(r => r.fecha.startsWith(month));
-        const periodPagos = pagos.filter(p => p.fechaPago.startsWith(month));
+        const periodRegistros = registros.filter(r => r.date && typeof r.date === 'string' && r.date.startsWith(month));
+        const periodPagos = pagos.filter(p => p.fechaPago && typeof p.fechaPago === 'string' && p.fechaPago.startsWith(month));
 
         let income = 0;
         let expenses = 0;
         let taxPaid = 0;
 
         periodRegistros.forEach(r => {
-            if (r.tipo === 'ingreso') income += r.monto;
-            else if (r.tipo === 'gasto') expenses += r.monto;
+            if (r.type === 'ingreso') income += r.amount;
+            else if (r.type === 'gasto') expenses += r.amount;
         });
 
         periodPagos.forEach(p => {

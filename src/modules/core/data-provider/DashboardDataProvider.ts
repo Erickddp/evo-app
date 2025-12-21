@@ -39,7 +39,10 @@ export const dashboardDataProvider = {
 
     getMonthlyRecords(registros: RegistroFinanciero[], month: string): RegistroFinanciero[] {
         // Robust check? Assume ISO format YYYY-MM-DD
-        return registros.filter(r => r.date.startsWith(month));
+        return registros.filter(r => {
+            if (!r.date || typeof r.date !== 'string') return false;
+            return r.date.startsWith(month);
+        });
     },
 
     computeStats(records: RegistroFinanciero[]): DashboardStats {

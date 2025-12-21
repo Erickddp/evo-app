@@ -48,7 +48,7 @@ export const normalizeMovements = (
         else if (t.type === 'gasto' || t.type === 'pago') kind = 'expense';
         else if (t.type === 'impuesto') kind = 'tax';
 
-        if (kind) {
+        if (kind && t.date && typeof t.date === 'string') {
             normalized.push({
                 id: t.id,
                 date: t.date,

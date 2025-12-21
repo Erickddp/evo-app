@@ -44,7 +44,10 @@ export const computeMonthly = (params: TaxComputationParams): TaxResult => {
 
     // 2. Filter by Month
     // RegistroFinanciero.date is ISO YYYY-MM-DD
-    const monthRecords = registros.filter(r => r.date.startsWith(month));
+    const monthRecords = registros.filter(r => {
+        if (!r.date || typeof r.date !== 'string') return false;
+        return r.date.startsWith(month);
+    });
 
     if (monthRecords.length === 0) {
         return {
