@@ -92,7 +92,7 @@ export async function saveMovimientosSnapshot(transaction: EvoTransaction) {
 }
 
 
-// Helper to remove if needed
+
 export async function deleteMovimientoFromStore(id: string) {
     try {
         await evoStore.registrosFinancieros.delete(id);

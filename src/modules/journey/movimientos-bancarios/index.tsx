@@ -627,7 +627,7 @@ export const MovimientosBancariosTool: React.FC = () => {
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                                                {importPreview.errors.map((err, idx) => (
+                                                {importPreview.errors.map((err: CsvRowError, idx) => (
                                                     <tr key={idx}>
                                                         <td className="p-2 font-mono text-gray-500">{err.row}</td>
                                                         <td className="p-2 text-red-600 font-medium">{err.reason}</td>
