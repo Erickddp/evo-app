@@ -54,7 +54,10 @@ export const facturasMapper = {
             formaPago: inv.paymentForm,
             metodoPago: inv.paymentMethod,
             usoCfdi: inv.cfdiUse,
-            notas: inv.notes
+            notas: inv.notes,
+            // Cast to any to support extended fields from Journey module
+            links: (inv as any).links,
+            metadata: (inv as any).metadata
         };
     },
 
@@ -72,12 +75,14 @@ export const facturasMapper = {
             paymentMethod: f.metodoPago || 'PUE',
             cfdiUse: f.usoCfdi || 'G03',
             notes: f.notas,
+            links: f.links,
+            metadata: f.metadata,
             month: f.fechaEmision.substring(0, 7),
             paid: f.pagada,
             realized: true,
             paymentDate: f.fechaPago,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
-        };
+        } as unknown as Invoice;
     }
 };

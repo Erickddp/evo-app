@@ -54,6 +54,16 @@ export const dashboardDataProvider = {
         let cfdi = 0, bank = 0, manual = 0, tax = 0;
 
         for (const r of records) {
+            // DEDUPLICATION RULE:
+            // DEDUPLICATION RULE:
+            // If source is 'facturacion-crm' or 'sat-import', AND it is reconciled to a bank movement, ignore it from totals.
+            // The bank movement is the source of truth for the money flow.
+            const isInvoiceSource = r.source === 'facturacion-crm' || r.source === 'sat-import';
+
+            if (isInvoiceSource && (r.links?.reconciledTo || r.metadata?.isReconciled)) {
+                continue;
+            }
+
             // Standardize fields (Canonical keys)
             const type = r.type;
             const amount = r.amount || 0;
@@ -73,7 +83,7 @@ export const dashboardDataProvider = {
             }
 
             // Sources
-            if (source === 'cfdi') cfdi++;
+            if (source === 'cfdi' || isInvoiceSource) cfdi++;
             else if (source === 'bank') bank++;
             else if (source === 'tax') tax++;
             else manual++; // Fallback: count anything else (manual, ingresos-manager, manual-csv) as manual
@@ -87,7 +97,11 @@ export const dashboardDataProvider = {
             noDeduciblesTotal,
             unknownClassificationsCount,
             sourcesCount: { cfdi, bank, manual, tax },
-            recordsCount: records.length
+            recordsCount: records.length,
+            // Pending Reconcile: Bank records that do NOT have links.reconciledTo (or other side?)
+            // User request: "Reconcile Step Done = stats.reconcilePendingCount === 0"
+            // Simple approach: Pending = Count of Bank Movements in this month that are NOT reconciled.
+            reconcilePendingCount: records.filter(rec => rec.source === 'bank' && !rec.links?.reconciledTo && !rec.metadata?.isReconciled).length
         };
     },
 

@@ -14,4 +14,5 @@ export type EvoProfile = {
         journeyV1?: boolean;
         taxEngineV1?: boolean;
     };
+    rfc?: string; // RFC for SAT Import Classification
 };

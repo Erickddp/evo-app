@@ -40,7 +40,14 @@ export const journeyEngine = {
         setStatus('classify', classifyDone ? 'done' : 'pending');
 
         // 4. Reconcile
-        setStatus('reconcile', classifyDone ? 'done' : 'pending');
+        // 4. Reconcile
+        // Done if we have bank records AND invoice records AND pending count is 0
+        const hasBank = stats.sourcesCount.bank > 0;
+        const hasCfdi = stats.sourcesCount.cfdi > 0;
+        const allReconciled = stats.reconcilePendingCount === 0;
+        const reconcileDone = hasBank && hasCfdi && allReconciled;
+
+        setStatus('reconcile', reconcileDone ? 'done' : 'pending');
 
         // 5. Fiscal Preview
         const taxEnabled = isTaxEngineEnabled(profile);

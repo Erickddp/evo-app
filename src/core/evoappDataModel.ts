@@ -74,6 +74,10 @@ export interface Factura {
     metodoPago?: string;
     usoCfdi?: string;
     notas?: string;
+
+    // Extension fields
+    links?: Record<string, any>;
+    metadata?: Record<string, any>;
 }
 
 // ==========================================

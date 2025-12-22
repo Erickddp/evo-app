@@ -17,6 +17,7 @@ export interface DashboardStats {
         tax: number;
     };
     recordsCount: number;
+    reconcilePendingCount: number;
 }
 
 export interface DashboardSignals {

@@ -1,5 +1,5 @@
 export type FinancialRecordType = 'ingreso' | 'gasto' | 'impuesto';
-export type FinancialRecordSource = 'bank' | 'cfdi' | 'manual' | 'tax';
+export type FinancialRecordSource = 'bank' | 'cfdi' | 'manual' | 'tax' | 'facturacion-crm' | 'sat-import';
 export type TaxabilityStatus = 'deducible' | 'no_deducible' | 'unknown';
 export type RegimenTarget = 'PM' | 'PF_RESICO';
 
@@ -7,6 +7,8 @@ export interface FinancialRecordLinks {
     facturaId?: string;
     xmlUuid?: string;
     bankMovementId?: string;
+    satUuid?: string;
+    reconciledTo?: string;
 }
 
 /**

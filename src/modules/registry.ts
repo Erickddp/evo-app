@@ -9,9 +9,15 @@ import { facturasDefinition } from './facturas/meta';
 import { taxCalculationDefinition } from './tax-calculation';
 import { evoLibraryDefinition } from './evo-library/meta';
 import { movimientosBancariosDefinition } from './journey/movimientos-bancarios';
+import { facturacionCrmDefinition } from './journey/facturacion-crm/meta'; // New module // Assuming this is also new based on the instruction's snippet, though not explicitly stated as "New module"
 
 export const tools: Tool[] = [
-    movimientosBancariosDefinition,
+    // --- MAIN TOOLS ---
+    movimientosBancariosDefinition, // Journey Step 1
+    facturacionCrmDefinition,       // Journey Step 2
+
+    // --- LEGACY / OTHER TOOLS ---
+    // dashboardDefinition, // This was in the instruction's snippet but not in the original file, so I'm commenting it out or assuming it's not meant to be added without an import.
     cfdiValidatorDefinition,
     ingresosManagerDefinition,
     bankReconcilerDefinition,
