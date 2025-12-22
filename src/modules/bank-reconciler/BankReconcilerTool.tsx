@@ -1,11 +1,19 @@
 import React, { useState, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Upload, FileText, Download, CheckCircle, AlertCircle, Loader2, Save } from 'lucide-react';
 import { parsePdfStatement } from './pdfParser';
 import type { ParsedPdfResult } from './types';
 import { downloadMovementsAsCsv, buildBackupCsvFilename } from './csvExport';
 import { ingestBankMovements } from './ingest';
+import { JourneyToolHeader } from '../core/journey/components/JourneyToolHeader';
+import { toMonthKey } from '../core/utils/month';
 
 export const BankReconcilerTool: React.FC = () => {
+    // Journey Context
+    const [searchParams] = useSearchParams();
+    const urlMonth = searchParams.get('month');
+    const currentMonth = toMonthKey(urlMonth) || new Date().toISOString().slice(0, 7);
+
     const [file, setFile] = useState<File | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [isImporting, setIsImporting] = useState(false);
@@ -74,13 +82,15 @@ export const BankReconcilerTool: React.FC = () => {
     };
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-[400px] p-6 text-center animate-in fade-in duration-500">
-
-            {/* Header Minimalista */}
-            <div className="mb-8">
-                <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">Conciliación Bancaria</h2>
-                <p className="text-gray-500 dark:text-gray-400 text-sm">Convierte tu estado de cuenta BBVA a CSV e importa tus datos.</p>
+        <div className="flex flex-col items-center justify-center min-h-[400px] p-0 text-center animate-in fade-in duration-500 w-full">
+            <div className="w-full text-left mb-6">
+                <JourneyToolHeader
+                    currentMonth={currentMonth}
+                    title="Conciliación Bancaria"
+                    subtitle="Convierte tu estado de cuenta BBVA a CSV e importa tus datos."
+                />
             </div>
+
 
             {/* Estado 1: Sin archivo (o reset) */}
             {!result && (

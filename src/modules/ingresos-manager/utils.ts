@@ -1,4 +1,76 @@
-import { type EvoTransaction, createEvoTransaction } from '../../core/domain/evo-transaction';
+import { type EvoTransaction } from '../../core/domain/evo-transaction';
+import { ingresosMapper } from '../../core/mappers/ingresosMapper';
+import type { RegistroFinanciero } from '../../core/evoappDataModel';
+
+
+export function normalizeIngresosToRegistro(input: any): RegistroFinanciero | null {
+    try {
+        if (!input) return null;
+
+        // 1. Date Normalization
+        let date = '';
+        if (input.date instanceof Date) {
+            date = input.date.toISOString().split('T')[0];
+        } else if (typeof input.date === 'string') {
+            // Basic YYYY-MM-DD check or try to standardise
+            // For now, accept generic strings if they look like dates, or let the store validation fail later.
+            // But strict requirement says: converts to YYYY-MM-DD.
+            if (input.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                date = input.date;
+            } else {
+                const d = new Date(input.date);
+                if (!isNaN(d.getTime())) {
+                    date = d.toISOString().split('T')[0];
+                }
+            }
+        }
+
+        if (!date) return null;
+
+        // 2. Amount & Type
+        let amount = Number(input.amount);
+        if (isNaN(amount) || amount === 0) return null; // Amount must be non-zero
+
+        let type: 'ingreso' | 'gasto' = input.type === 'ingreso' ? 'ingreso' : 'gasto';
+
+        // Handle negative amounts if passed - enforce positive amount but trust type? 
+        // Or flip type? User says "conservar signo interpretando type".
+        // Let's ensure amount is positive and type is correct.
+        if (amount < 0) {
+            amount = Math.abs(amount);
+            // If negative, maybe flip type? 
+            // Usually negative income = expense. 
+            // But let's assume input.type is authoritative if explicit.
+        }
+
+        // 3. Concept
+        const concept = typeof input.concept === 'string' ? input.concept.trim() : 'Movimiento Manual';
+        if (!concept) return null;
+
+        // 4. Source
+        const source = 'manual';
+
+        // 5. ID Construction
+        const id = input.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+        const now = new Date().toISOString();
+
+        return {
+            id,
+            date,
+            type,
+            amount,
+            concept,
+            source,
+            taxability: input.taxability || 'exempt', // Default
+            metadata: input.metadata || {},
+            links: input.links || [],
+            createdAt: now,
+            updatedAt: now
+        };
+    } catch (e) {
+        return null;
+    }
+}
 
 export interface ImportResult {
     movements: EvoTransaction[];
@@ -170,13 +242,26 @@ export function parseIngresosCsv(content: string): ImportResult {
                 continue;
             }
 
-            const movement = createEvoTransaction({
+            // Gatekeeper: Normalize and Validate (Local)
+            const rawInput = {
                 date: dateStr,
                 concept: conceptStr,
                 amount: amount,
                 type: type,
-                source: 'manual-csv'
-            });
+                source: 'manual'
+            };
+
+            const canonical = normalizeIngresosToRegistro(rawInput);
+
+            if (!canonical) {
+                result.stats.errors++;
+                result.stats.errorDetails.push(`Fila ${rowNum}: Error de validación al normalizar.`);
+                continue;
+            }
+
+            // Convert to Legacy for UI
+            const movement = ingresosMapper.toLegacy(canonical);
+
             result.movements.push(movement);
             result.stats.imported++;
 
@@ -264,7 +349,6 @@ export function getYearlySummary(movements: EvoTransaction[]): YearlySummary[] {
 
 // --- Data Store Helpers ---
 import { evoStore } from '../../core/evoappDataStore';
-import { ingresosMapper } from '../../core/mappers/ingresosMapper';
 import { evoEvents } from '../../core/events';
 
 export async function loadMovementsFromStore(): Promise<EvoTransaction[]> {

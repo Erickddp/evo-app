@@ -9,7 +9,7 @@ export interface LegacyBankMovement {
     date: string;
     description: string;
     amount: number;
-    type: 'income' | 'expense';
+    type: 'ingreso' | 'gasto';
 }
 
 export const bankMapper = {
@@ -20,8 +20,8 @@ export const bankMapper = {
             descripcion: m.description,
             // In legacy, amount is signed or absolute depending on context, but usually absolute + type.
             // In canonical: cargo (out) / abono (in).
-            cargo: m.type === 'expense' ? Math.abs(m.amount) : undefined,
-            abono: m.type === 'income' ? Math.abs(m.amount) : undefined,
+            cargo: m.type === 'gasto' ? Math.abs(m.amount) : undefined,
+            abono: m.type === 'ingreso' ? Math.abs(m.amount) : undefined,
             conciliado: false
         };
     },
@@ -34,7 +34,7 @@ export const bankMapper = {
             date: m.fecha,
             description: m.descripcion,
             amount: amount,
-            type: isIncome ? 'income' : 'expense'
+            type: isIncome ? 'ingreso' : 'gasto'
         };
     }
 };

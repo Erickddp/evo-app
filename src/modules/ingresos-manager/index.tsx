@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { DollarSign, Plus, Trash2, Download, Search, Filter, X } from 'lucide-react';
 import type { ToolDefinition } from '../shared/types';
-import { type EvoTransaction, createEvoTransaction, calculateTotals } from '../../core/domain/evo-transaction';
+import { type EvoTransaction, calculateTotals } from '../../core/domain/evo-transaction';
 import { evoEvents } from '../../core/events';
-import { parseIngresosCsv, loadMovementsFromStore, saveSnapshot, getYear } from './utils';
+import { parseIngresosCsv, loadMovementsFromStore, saveSnapshot, getYear, normalizeIngresosToRegistro } from './utils';
+import { ingresosMapper } from '../../core/mappers/ingresosMapper';
 import { AnalyticsPanel } from './AnalyticsPanel';
+import { JourneyToolHeader } from '../core/journey/components/JourneyToolHeader';
+import { toMonthKey } from '../core/utils/month';
 
 // --- Constants ---
 const MONTHS = [
@@ -33,6 +37,15 @@ function formatCurrency(amount: number): string {
 
 // --- Component ---
 export const IngresosManagerTool: React.FC = () => {
+    // URL Context
+    const [searchParams] = useSearchParams();
+    const urlMonth = searchParams.get('month');
+    // Default to current month if not specified
+    const currentMonth = toMonthKey(urlMonth) || todayAsIso().slice(0, 7);
+
+    // Filter Initialization
+    const [y, m] = currentMonth.split('-').map(Number);
+
     // Data State
     const [movements, setMovements] = useState<EvoTransaction[]>([]);
     const [isLoaded, setIsLoaded] = useState(false);
@@ -48,10 +61,10 @@ export const IngresosManagerTool: React.FC = () => {
     const [amountStr, setAmountStr] = useState<string>('');
     const [type, setType] = useState<EvoTransaction['type']>('gasto');
 
-    // Filter Panel State
-    const [filterYear, setFilterYear] = useState<number | ''>('');
-    const [filterMonth, setFilterMonth] = useState<number | ''>('');
-    const [appliedFilter, setAppliedFilter] = useState<{ year: number; month: number } | null>(null);
+    // Filter Panel State (Initialized with Journey Context)
+    const [filterYear, setFilterYear] = useState<number | ''>(y);
+    const [filterMonth, setFilterMonth] = useState<number | ''>(m);
+    const [appliedFilter, setAppliedFilter] = useState<{ year: number; month: number } | null>({ year: y, month: m });
 
     // Global Search State
     const [globalSearch, setGlobalSearch] = useState('');
@@ -87,7 +100,6 @@ export const IngresosManagerTool: React.FC = () => {
         return () => evoEvents.off('data:changed', handleDataChanged);
     }, []);
 
-    // Persist whenever movements change (only after initial load)
     // Persist whenever movements change (only after initial load AND if dirty)
     useEffect(() => {
         const save = async () => {
@@ -157,7 +169,8 @@ export const IngresosManagerTool: React.FC = () => {
         }
 
         try {
-            const newMovement = createEvoTransaction({
+            // Gatekeeper normalization for manual entry
+            const canonical = normalizeIngresosToRegistro({
                 date,
                 concept: concept.trim(),
                 amount: parsedAmount,
@@ -165,10 +178,13 @@ export const IngresosManagerTool: React.FC = () => {
                 source: 'manual'
             });
 
-            setMovements((prev) => {
-                dirtyRef.current = true;
-                return [newMovement, ...prev];
-            });
+            if (canonical) {
+                const newMovement = ingresosMapper.toLegacy(canonical);
+                setMovements((prev) => {
+                    dirtyRef.current = true;
+                    return [newMovement, ...prev];
+                });
+            }
 
             // Reset form but keep date and type
             setConcept('');
@@ -277,12 +293,13 @@ export const IngresosManagerTool: React.FC = () => {
 
     return (
         <div className="space-y-6">
-            {/* Header & Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="md:col-span-1">
-                    <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">Gestor de Ingresos</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Control de gastos e ingresos.</p>
-                </div>
+            <JourneyToolHeader
+                currentMonth={currentMonth}
+                title="Gestor de Ingresos"
+                subtitle="Control detallado y clasificación manual de movimientos."
+            />
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg border border-green-100 dark:border-green-800">
                     <div className="text-xs text-green-600 dark:text-green-400 font-medium uppercase">Total Ingresos</div>
                     <div className="text-lg font-bold text-green-700 dark:text-green-300">{formatCurrency(stats.totalIncome)}</div>
@@ -531,7 +548,7 @@ export const IngresosManagerTool: React.FC = () => {
                     </table>
                 </div>
             </div>
-        </div>
+        </div >
     );
 };
 

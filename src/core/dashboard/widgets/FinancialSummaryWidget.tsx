@@ -3,6 +3,8 @@ import { DollarSign, TrendingUp, TrendingDown, ArrowRight, AlertCircle } from 'l
 import { Link } from 'react-router-dom';
 import { evoStore } from '../../evoappDataStore';
 import { evoEvents } from '../../events';
+import { getJourneyLink } from '../../../modules/core/journey/journeyLinks';
+import { isInMonth } from '../../../modules/core/utils/month';
 
 interface IncomeStats {
     totalIncome: number;
@@ -11,10 +13,13 @@ interface IncomeStats {
     movementsCount: number;
 }
 
-export function FinancialSummaryWidget() {
+export function FinancialSummaryWidget({ month }: { month?: string }) {
     const [stats, setStats] = useState<IncomeStats | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
+
+    // Default to current month if not provided
+    const targetMonth = month || new Date().toISOString().slice(0, 7);
 
     useEffect(() => {
         let isMounted = true;
@@ -29,12 +34,26 @@ export function FinancialSummaryWidget() {
                     return;
                 }
 
+                // Filter by month
+                const monthlyMovements = movements.filter(m => isInMonth(m.date, targetMonth));
+
+                if (monthlyMovements.length === 0) {
+                    setStats({
+                        totalIncome: 0,
+                        totalExpense: 0,
+                        netBalance: 0,
+                        movementsCount: 0,
+                    });
+                    setLoading(false);
+                    return;
+                }
+
                 // Filter and calculate strictly based on 'ingreso' and 'gasto'
                 let totalIncome = 0;
                 let totalExpense = 0;
                 let count = 0;
 
-                movements.forEach(m => {
+                monthlyMovements.forEach(m => {
                     // Ensure we handle amounts as numbers
                     const amt = Number(m.amount) || 0;
 
@@ -72,7 +91,7 @@ export function FinancialSummaryWidget() {
             isMounted = false;
             evoEvents.off('finance:updated', handleReload);
         };
-    }, []);
+    }, [targetMonth]);
 
     const formatCurrency = (val: number) => val.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
@@ -112,8 +131,8 @@ export function FinancialSummaryWidget() {
 
                 {!stats || stats.movementsCount === 0 ? (
                     <div className="text-center py-6">
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Sin movimientos registrados en Gestor de Ingresos.</p>
-                        <Link to="/tools/ingresos" className="mt-2 inline-flex items-center text-xs font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400">
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Sin movimientos en {targetMonth}.</p>
+                        <Link to={getJourneyLink('ingresos-manager', targetMonth)} className="mt-2 inline-flex items-center text-xs font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400">
                             Ir a registrar <ArrowRight size={12} className="ml-1" />
                         </Link>
                     </div>
@@ -163,7 +182,7 @@ export function FinancialSummaryWidget() {
                         {stats.movementsCount} movimientos
                     </span>
                     <Link
-                        to="/tools/ingresos"
+                        to={getJourneyLink('ingresos-manager', targetMonth)}
                         className="inline-flex items-center text-xs font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 transition-colors"
                     >
                         Ver detalle <ArrowRight size={12} className="ml-1" />

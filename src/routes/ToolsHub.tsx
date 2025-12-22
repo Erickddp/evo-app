@@ -1,34 +1,32 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toolsRegistry } from '../modules/registry';
 import { ErrorBoundary } from '../core/errors/ErrorBoundary';
 import { ToolsSidebar } from '../components/ToolsSidebar';
 import { Menu } from 'lucide-react';
 import { ToolHeaderSignals } from '../modules/core/data-provider/ToolHeaderSignals';
 
+
 export function ToolsHub() {
   const navigate = useNavigate();
   const { toolId } = useParams<{ toolId: string }>();
+  // Preserve URL params (month) when switching tools
+  const [searchParams] = useSearchParams();
 
   // Use URL param as source of truth for selected tool
   const selectedToolId = toolId || null;
-
-  // Restore last used tool if visiting /tools root?
-  // User might prefer clean state or last state.
-  // Prompt says "Eliminar dependencia de ToolHub state-only".
-  // Let's rely on URL. If root, show "Select Tool" or redirect to last?
-  // Simplest: If root, show empty. 
-  // But for better UX, if no param but localStorage has value, maybe redirect?
-  // Let's implement redirect check in useEffect.
 
   useEffect(() => {
     if (!selectedToolId) {
       const last = localStorage.getItem('evorix-selected-tool');
       if (last) {
-        navigate(`/tools/${last}`, { replace: true });
+        navigate({
+          pathname: `/tools/${last}`,
+          search: searchParams.toString()
+        }, { replace: true });
       }
     }
-  }, [selectedToolId, navigate]);
+  }, [selectedToolId, navigate, searchParams]);
 
   // State for sidebar collapse. Defaults to collapsed on mobile, expanded on desktop.
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
@@ -46,8 +44,12 @@ export function ToolsHub() {
     }
   }, [selectedToolId]);
 
+
   const handleSelectTool = (id: string) => {
-    navigate(`/tools/${id}`);
+    navigate({
+      pathname: `/tools/${id}`,
+      search: searchParams.toString()
+    });
     // Auto-collapse sidebar when a tool is selected ONLY on mobile
     if (window.innerWidth < 768) {
       setIsSidebarCollapsed(true);

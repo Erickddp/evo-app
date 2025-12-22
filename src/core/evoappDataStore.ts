@@ -346,6 +346,7 @@ function normalizeRegistroGatekeeper(input: any): RegistroFinanciero | null {
     // Fix source strictness if needed. 'migration' might not be in the enum defined in types.ts
     if (source === 'migration') {
         registro.source = 'manual';
+        if (!registro.metadata) registro.metadata = {};
         registro.metadata.originalSource = 'migration';
     }
 

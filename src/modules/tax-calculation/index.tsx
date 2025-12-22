@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Calculator, DollarSign, Calendar, TrendingUp, TrendingDown, AlertCircle, Save, CheckCircle, User, Edit2 } from 'lucide-react';
 import { evoStore } from '../../core/evoappDataStore';
 import { taxCalcMapper } from '../../core/mappers/taxCalcMapper';
@@ -6,13 +7,21 @@ import type { RegistroFinanciero, PagoImpuesto } from '../../core/evoappDataMode
 import type { ToolDefinition } from '../shared/types';
 import { TaxProfileForm } from './components/TaxProfileForm';
 import { getCalculatorForRegimen } from './calculators/factory';
+import { JourneyToolHeader } from '../core/journey/components/JourneyToolHeader';
+import { toMonthKey, isInMonth } from '../core/utils/month';
 
 
 export const TaxCalculationModule: React.FC = () => {
+    // Journey Context
+    const [searchParams] = useSearchParams();
+    const urlMonth = searchParams.get('month');
+    const currentMonth = toMonthKey(urlMonth) || new Date().toISOString().slice(0, 7);
+
     const [registros, setRegistros] = useState<RegistroFinanciero[]>([]);
     const [pagos, setPagos] = useState<PagoImpuesto[]>([]);
     const [loading, setLoading] = useState(true);
-    const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+    // Initialize filter with currentMonth, but allow local override via input
+    const [month, setMonth] = useState(currentMonth); // YYYY-MM
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
 
     useEffect(() => {
@@ -76,8 +85,8 @@ export const TaxCalculationModule: React.FC = () => {
 
     const stats = useMemo(() => {
         // Filter by month
-        const periodRegistros = registros.filter(r => r.date && typeof r.date === 'string' && r.date.startsWith(month));
-        const periodPagos = pagos.filter(p => p.fechaPago && typeof p.fechaPago === 'string' && p.fechaPago.startsWith(month));
+        const periodRegistros = registros.filter(r => isInMonth(r.date, month));
+        const periodPagos = pagos.filter(p => isInMonth(p.fechaPago, month));
 
         let income = 0;
         let expenses = 0;
@@ -158,21 +167,24 @@ export const TaxCalculationModule: React.FC = () => {
 
     return (
         <div className="space-y-6 p-6 max-w-7xl mx-auto">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <Calculator className="text-indigo-600" /> Cálculo de Impuestos
-                    </h1>
-                    <p className="text-gray-500 dark:text-gray-400">Estimación fiscal basada en movimientos registrados.</p>
-                </div>
-                <div className="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
-                    <Calendar size={16} className="text-gray-500" />
-                    <input
-                        type="month"
-                        value={month}
-                        onChange={e => setMonth(e.target.value)}
-                        className="border-none bg-transparent text-sm focus:ring-0 text-gray-700 dark:text-gray-200"
-                    />
+            <JourneyToolHeader
+                currentMonth={currentMonth}
+                title="Cálculo de Impuestos"
+                subtitle="Estimación fiscal basada en movimientos registrados."
+            />
+
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border border-gray-100 dark:border-gray-700">
+                <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Periodo de cálculo:</span>
+                    <div className="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm relative">
+                        <Calendar size={16} className="text-gray-500 pointer-events-none" />
+                        <input
+                            type="month"
+                            value={month}
+                            onChange={e => setMonth(e.target.value)}
+                            className="border-none bg-transparent text-sm focus:ring-0 text-gray-700 dark:text-gray-200 p-0"
+                        />
+                    </div>
                 </div>
             </div>
 

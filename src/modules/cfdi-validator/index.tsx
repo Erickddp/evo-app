@@ -1,12 +1,20 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { FileCheck, Upload, FileText, AlertCircle, Download, Search, Loader2, ArrowUpDown } from 'lucide-react';
 import type { ToolDefinition } from '../shared/types';
 import { parseCfdiXml, type CfdiSummary } from './parser';
 import { evoStore } from '../../core/evoappDataStore';
 import { Save } from 'lucide-react';
 import { normalizeToRegistroFinanciero } from '../core/normalize/normalizeToRegistroFinanciero';
+import { JourneyToolHeader } from '../core/journey/components/JourneyToolHeader';
+import { toMonthKey } from '../core/utils/month';
 
 export const CFDIValidatorTool: React.FC = () => {
+    // Journey Context
+    const [searchParams] = useSearchParams();
+    const urlMonth = searchParams.get('month');
+    const currentMonth = toMonthKey(urlMonth) || new Date().toISOString().slice(0, 7);
+
     const [files, setFiles] = useState<File[]>([]);
     const [rows, setRows] = useState<CfdiSummary[]>([]);
     const [errors, setErrors] = useState<{ fileName: string; message: string }[]>([]);
@@ -250,17 +258,11 @@ export const CFDIValidatorTool: React.FC = () => {
 
     return (
         <div className="space-y-6">
-            {/* Header Card */}
-            <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-md border border-blue-100 dark:border-blue-800">
-                <h3 className="font-medium text-blue-900 dark:text-blue-100 flex items-center gap-2">
-                    <FileCheck className="w-5 h-5" />
-                    Validador Masivo de CFDI
-                </h3>
-                <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-                    Selecciona múltiples archivos XML para analizar, validar y exportar a CSV.
-                    El procesamiento se realiza completamente en tu navegador.
-                </p>
-            </div>
+            <JourneyToolHeader
+                currentMonth={currentMonth}
+                title="Validador Masivo de CFDI"
+                subtitle="Selecciona múltiples archivos XML para analizar, validar y exportar a CSV."
+            />
 
             {/* Controls */}
             <div className="flex flex-col gap-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">

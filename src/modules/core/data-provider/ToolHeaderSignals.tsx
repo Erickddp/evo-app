@@ -1,15 +1,13 @@
 
 import { AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useDashboardData } from './useDashboardData';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { getJourneyLink } from '../journey/journeyLinks';
 
 export function ToolHeaderSignals({ currentToolId }: { currentToolId: string }) {
-    // We default to current month for signals in tools, or maybe we read from URL/Store?
-    // ToolsHub doesn't have month context yet. 
-    // Defaults to "current month" inside the hook if logic matches Dashboard default.
-    // Dashboard default was `new Date()...`
-    // Let's rely on default behavior or pass explicit "current real month".
-    const month = new Date().toISOString().slice(0, 7);
+    const [searchParams] = useSearchParams();
+    const urlMonth = searchParams.get('month');
+    const month = urlMonth || new Date().toISOString().slice(0, 7);
     const { snapshot, isLoading } = useDashboardData(month);
 
     if (isLoading || !snapshot) return null;
@@ -27,14 +25,12 @@ export function ToolHeaderSignals({ currentToolId }: { currentToolId: string }) 
                 </div>
             );
         } else {
-            // If we are in the tool, we don't need a link to the tool, just status.
-            // Maybe no alert needed, as user is here to do it.
             return null;
         }
     }
 
-    // 2. Bank Tool Context (Assuming ID)
-    if (currentToolId === 'bank-reconciler') { // Checking ID
+    // 2. Bank Tool Context
+    if (currentToolId === 'bank-reconciler') {
         if (!signals.needsBankImport) {
             return (
                 <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center gap-2 text-emerald-400 text-sm animate-in fade-in slide-in-from-top-2">
@@ -46,7 +42,7 @@ export function ToolHeaderSignals({ currentToolId }: { currentToolId: string }) 
     }
 
     // 3. Classification Tool Context
-    if (currentToolId === 'ingresos-manager' || currentToolId === 'tax-tracker') { // Classification tools
+    if (currentToolId === 'ingresos-manager' || currentToolId === 'tax-tracker') {
         if (signals.needsClassification) {
             return (
                 <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center justify-between text-rose-400 text-sm animate-in fade-in slide-in-from-top-2">
@@ -54,10 +50,6 @@ export function ToolHeaderSignals({ currentToolId }: { currentToolId: string }) 
                         <AlertTriangle size={16} />
                         <span>Tienes {stats.unknownClassificationsCount} movimientos sin clasificar.</span>
                     </div>
-                    {/* If we are NOT in the specific classification tool (if split), give link. 
-                         If we ARE in the tool, maybe just highlight?
-                         "ingresos-manager" is generic. Let's assume user is where they need to be.
-                      */}
                 </div>
             );
         } else if (stats.recordsCount > 0) {
@@ -70,8 +62,7 @@ export function ToolHeaderSignals({ currentToolId }: { currentToolId: string }) 
         }
     }
 
-    // Generic Signals that might appear elsewhere?
-    // "Faltan CFDI" inside Bank Tool? useful context.
+    // Generic Signals
     if (currentToolId !== 'cfdi-validator' && signals.needsCfdiImport) {
         return (
             <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg flex items-center justify-between text-amber-400 text-sm animate-in fade-in slide-in-from-top-2">
@@ -79,7 +70,7 @@ export function ToolHeaderSignals({ currentToolId }: { currentToolId: string }) 
                     <AlertCircle size={16} />
                     <span>Faltan importar facturas de este mes.</span>
                 </div>
-                <Link to="/tools/cfdi-validator" className="underline hover:text-amber-300">Ir a CFDI</Link>
+                <Link to={getJourneyLink('import-cfdi', month)} className="underline hover:text-amber-300">Ir a CFDI</Link>
             </div>
         );
     }

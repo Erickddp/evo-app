@@ -4,13 +4,18 @@ import { evoStore } from '../../evoappDataStore';
 import { WidgetSkeleton, WidgetError, WidgetCard } from './WidgetCommon';
 import { evoEvents } from '../../events';
 
+import { isInMonth } from '../../../modules/core/utils/month';
+
 type Period = 'currentMonth' | 'last3Months' | 'currentYear';
 
-export function FacturasWidget() {
+export function FacturasWidget({ month }: { month?: string }) {
     const [invoices, setInvoices] = useState<any[]>([]);
     const [period, setPeriod] = useState<Period>('currentMonth');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
+
+    // Default to current month if not provided
+    const targetMonth = month || new Date().toISOString().slice(0, 7);
 
     useEffect(() => {
         let isMounted = true;
@@ -53,25 +58,29 @@ export function FacturasWidget() {
     const stats = useMemo(() => {
         if (invoices.length === 0) return null;
 
-        const now = new Date();
-        const currentMonthIso = now.toISOString().slice(0, 7); // YYYY-MM
-        const currentYearIso = now.getFullYear().toString();
+
+        const currentYearIso = targetMonth.split('-')[0];
 
         // 1. Filter by period
         let filtered = [];
         if (period === 'currentMonth') {
-            filtered = invoices.filter(inv => (inv.fechaEmision || '').startsWith(currentMonthIso));
+            filtered = invoices.filter(inv => isInMonth(inv.fechaEmision || '', targetMonth));
         } else if (period === 'currentYear') {
             filtered = invoices.filter(inv => (inv.fechaEmision || '').startsWith(currentYearIso));
         } else if (period === 'last3Months') {
+            // For last3months, we might want relative to targetMonth or relative to NOW?
+            // Usually dashboard historic view is relative to targetMonth.
+            // Let's implement relative to targetMonth for consistency.
+            const [y, m] = targetMonth.split('-').map(Number);
             const months: string[] = [];
             for (let i = 0; i < 3; i++) {
-                const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                const d = new Date(y, m - 1 - i, 1);
                 months.push(d.toISOString().slice(0, 7));
             }
+
             filtered = invoices.filter(inv => {
                 const dateStr = inv.fechaEmision || '';
-                return months.some(m => dateStr.startsWith(m));
+                return months.some(m => isInMonth(dateStr, m));
             });
         }
 
@@ -83,8 +92,8 @@ export function FacturasWidget() {
         const pendientesCount = pendientes.length;
         const pendientesTotal = pendientes.reduce((acc, inv) => acc + (Number(inv.total) || 0), 0);
 
-        // Optional: Mini summary for current month (always)
-        const currentMonthInvoices = invoices.filter(inv => (inv.fechaEmision || '').startsWith(currentMonthIso));
+        // Optional: Mini summary for target month (always)
+        const currentMonthInvoices = invoices.filter(inv => isInMonth(inv.fechaEmision || '', targetMonth));
         const currentMonthCount = currentMonthInvoices.length;
         const currentMonthAmount = currentMonthInvoices.reduce((acc, inv) => acc + (Number(inv.total) || 0), 0);
 
@@ -97,7 +106,7 @@ export function FacturasWidget() {
             currentMonthAmount,
             hasData: invoices.length > 0
         };
-    }, [invoices, period]);
+    }, [invoices, period, targetMonth]);
 
     const formatCurrency = (val: number) => val.toLocaleString('es-MX', { style: 'currency', currency: 'MXN' });
 
@@ -145,7 +154,7 @@ export function FacturasWidget() {
                             onChange={(e) => setPeriod(e.target.value as Period)}
                             className="appearance-none bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-300 rounded-lg py-1 pl-2 pr-6 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                         >
-                            <option value="currentMonth">Este mes</option>
+                            <option value="currentMonth">Este mes ({targetMonth})</option>
                             <option value="last3Months">Últimos 3 meses</option>
                             <option value="currentYear">Año actual</option>
                         </select>

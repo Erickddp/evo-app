@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, cloneElement, isValidElement } from 'react';
 import { RefreshCw, ChevronLeft, ChevronRight, AlertTriangle, AlertCircle, TrendingUp, ArrowRight, Check, Clock, Lock } from 'lucide-react';
 import { evoEvents } from '../core/events';
 import { dataStore } from '../core/data/dataStore';
@@ -12,6 +12,7 @@ import { journeyStore } from '../modules/core/journey/JourneyStore';
 import { journeyEngine } from '../modules/core/journey/JourneyEngine';
 import type { DashboardDataSnapshot } from '../modules/core/data-provider/types';
 import type { EvoProfile } from '../modules/core/profiles/profileTypes';
+import { getJourneyLink } from '../modules/core/journey/journeyLinks';
 
 // Import and register widgets
 import { SystemStatusWidget } from '../core/dashboard/widgets/SimpleWidgets';
@@ -74,7 +75,7 @@ function JourneyProgressCard({ snapshot, profile, month }: { snapshot: Dashboard
                             {nextStep.title}
                         </h3>
                         <Link
-                            to={nextStep.cta || `/journey/close-month/${month}`}
+                            to={getJourneyLink(nextStep.id, month)}
                             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg shadow-lg shadow-blue-900/20 transition-all w-full justify-center"
                         >
                             Continuar <ArrowRight size={14} />
@@ -234,24 +235,25 @@ export function Dashboard() {
                         <div className="flex flex-wrap items-center gap-3">
                             {/* Missing Data Signals */}
                             {snapshot.signals.needsCfdiImport && (
-                                <Link to={`/tools/cfdi?month=${month}`} className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 rounded-full text-xs font-medium text-amber-400 transition-colors">
+                                <Link to={getJourneyLink('import-cfdi', month)} className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 rounded-full text-xs font-medium text-amber-400 transition-colors">
                                     <AlertTriangle size={14} />
                                     <span>Faltan CFDI del mes</span>
                                 </Link>
                             )}
                             {snapshot.signals.needsBankImport && (
-                                <Link to={`/tools/bank?month=${month}`} className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-full text-xs font-medium text-blue-400 transition-colors">
+                                <Link to={getJourneyLink('import-bank', month)} className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-full text-xs font-medium text-blue-400 transition-colors">
                                     <AlertCircle size={14} />
                                     <span>Faltan movimientos bancarios</span>
                                 </Link>
                             )}
                             {/* Classification Signal */}
                             {snapshot.signals.needsClassification && (
-                                <Link to={`/tools/classify?month=${month}`} className="inline-flex items-center gap-2 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-full text-xs font-medium text-rose-400 transition-colors">
+                                <Link to={getJourneyLink('classify', month)} className="inline-flex items-center gap-2 px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-full text-xs font-medium text-rose-400 transition-colors">
                                     <AlertCircle size={14} />
                                     <span>{snapshot.stats.unknownClassificationsCount} movimientos sin clasificar</span>
                                 </Link>
                             )}
+
 
                             {/* All Good State */}
                             {!snapshot.signals.needsBankImport && !snapshot.signals.needsCfdiImport && !snapshot.signals.needsClassification && (snapshot.stats.sourcesCount.cfdi + snapshot.stats.sourcesCount.manual) > 0 && (
@@ -359,7 +361,9 @@ export function Dashboard() {
 
                         return (
                             <div key={widget.id} className={`${colSpan} animate-in fade-in zoom-in-95 duration-300`}>
-                                {widget.component}
+                                {isValidElement(widget.component)
+                                    ? cloneElement(widget.component as React.ReactElement<any>, { month })
+                                    : widget.component}
                             </div>
                         );
                     })}
