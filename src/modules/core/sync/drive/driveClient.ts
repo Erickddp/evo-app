@@ -12,6 +12,7 @@ export interface DriveClient {
     listBackups(prefix?: string): Promise<Array<{ id: string; name: string; modifiedTime?: string; size?: number }>>;
     downloadFile(fileId: string): Promise<Blob>;
     getUserInfo(): Promise<DriveUser>;
+    getLatestBackupMeta(prefix?: string): Promise<{ id: string; name: string; modifiedTime: string } | null>;
 }
 
 export interface DriveUser {
@@ -59,6 +60,7 @@ class GoogleDriveClient implements DriveClient {
                 scope: SCOPES,
                 callback: (tokenResponse: any) => {
                     if (tokenResponse.access_token) {
+                        console.log(`[SYNC_DIAG] Token received. Expires in: ${tokenResponse.expires_in}s`);
                         tokenManager.setToken(tokenResponse.access_token, tokenResponse.expires_in);
                     }
                 },
@@ -109,6 +111,7 @@ class GoogleDriveClient implements DriveClient {
                             return;
                         }
                         if (resp.access_token) {
+                            console.log(`[SYNC_DIAG] Standard GIS Token received. Expires in: ${resp.expires_in}s`);
                             tokenManager.setToken(resp.access_token, resp.expires_in);
                             resolve();
                         }
@@ -141,6 +144,7 @@ class GoogleDriveClient implements DriveClient {
         const res = await fetch(url, { ...options, headers });
 
         if (res.status === 401) {
+            console.warn('[SYNC_DIAG] 401 Unauthorized. Clearing token.');
             tokenManager.clear();
             throw new Error("Token expired or unauthorized (401)");
         }
@@ -164,6 +168,7 @@ class GoogleDriveClient implements DriveClient {
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
         form.append('file', blob);
 
+        console.log(`[SYNC_DIAG] Uploading file: ${name} (size: ${blob.size})`);
         const res = await this.fetchWithAuth(
             'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name',
             {
@@ -177,6 +182,7 @@ class GoogleDriveClient implements DriveClient {
     }
 
     async listAppDataFiles(prefix: string): Promise<Array<{ id: string; name: string; modifiedTime?: string }>> {
+        console.log(`[SYNC_DIAG] Listing AppData files with prefix: ${prefix}`);
         const query = `name contains '${prefix}' and trashed = false`;
         const params = new URLSearchParams({
             spaces: 'appDataFolder',
@@ -194,6 +200,7 @@ class GoogleDriveClient implements DriveClient {
         // Support V1 (backup_full) and V2 (manifest)
         // If prefix provided (e.g., 'evoapp_raquel'), filter by it.
         // Default prefix usually 'evoapp'.
+        console.log(`[SYNC_DIAG] Listing Backups with prefix: ${prefix}`);
         const nameFilter = prefix ? prefix : 'evoapp';
 
         // Match both manifesto and backup files for robustness, but V2 revolves around manifest.
@@ -216,7 +223,31 @@ class GoogleDriveClient implements DriveClient {
         }));
     }
 
+    async getLatestBackupMeta(prefix?: string): Promise<{ id: string; name: string; modifiedTime: string } | null> {
+        console.log(`[SYNC_DIAG] Checking latest backup meta for prefix: ${prefix}`);
+        // Ensure we get only the most recent one to save bandwidth/processing
+        const nameFilter = prefix ? prefix : 'evoapp';
+        const query = `(name contains '${nameFilter}_manifest_' or name contains '${nameFilter}_backup_full_') and trashed = false`;
+
+        const params = new URLSearchParams({
+            spaces: 'appDataFolder',
+            q: query,
+            fields: 'files(id,name,modifiedTime)',
+            orderBy: 'modifiedTime desc',
+            pageSize: '1'
+        });
+
+        const res = await this.fetchWithAuth(`https://www.googleapis.com/drive/v3/files?${params}`);
+        const data = await res.json();
+
+        if (data.files && data.files.length > 0) {
+            return data.files[0];
+        }
+        return null;
+    }
+
     async downloadFile(fileId: string): Promise<Blob> {
+        console.log(`[SYNC_DIAG] Downloading fileId: ${fileId}`);
         const res = await this.fetchWithAuth(
             `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
             { method: 'GET' }

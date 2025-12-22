@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { evoEvents } from '../../../core/events';
 import { driveClient, type DriveUser } from './drive/driveClient';
+import { tokenManager } from './drive/tokenManager';
 import { buildBackupV2 } from './backupSerializer';
 import { restoreFromBackupFile, type RestoreProgress } from './restoreEngine';
 import { RestoreModal } from './RestoreModal';
@@ -36,7 +37,31 @@ interface SyncContextValue {
     updateAccountStatus: () => Promise<void>;
     refreshBackups: () => Promise<void>;
     lastUserRefreshAt?: number;
+    // Smart Sync
+    checkForUpdates: () => Promise<void>;
+    remoteUpdateAvailable: { id: string; date: Date } | null;
+    resolveRemoteUpdate: (action: 'pull' | 'push') => Promise<void>;
 }
+
+// Persistence Helpers
+const SESSION_KEYS = {
+    localTs: (pid: string) => `evoapp:lastLocalBackupTs:${pid}`,
+    dirty: (pid: string) => `evoapp:dirty:${pid}`
+};
+
+const getLocalTs = (pid: string) => {
+    const val = localStorage.getItem(SESSION_KEYS.localTs(pid));
+    return val ? parseInt(val, 10) : 0;
+};
+const setLocalTs = (pid: string, ts: number) => {
+    localStorage.setItem(SESSION_KEYS.localTs(pid), ts.toString());
+};
+const getDirtyFlag = (pid: string) => {
+    return localStorage.getItem(SESSION_KEYS.dirty(pid)) === 'true';
+};
+const setDirtyFlag = (pid: string, isDirty: boolean) => {
+    localStorage.setItem(SESSION_KEYS.dirty(pid), isDirty ? 'true' : 'false');
+};
 
 const SyncContext = createContext<SyncContextValue | null>(null);
 
@@ -56,6 +81,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [driveError, setDriveError] = useState<string | undefined>();
     const [driveUser, setDriveUser] = useState<DriveUser | undefined>();
     const [lastUserRefreshAt, setLastUserRefreshAt] = useState<number | undefined>();
+    const [remoteUpdateAvailable, setRemoteUpdateAvailable] = useState<{ id: string; date: Date } | null>(null);
 
     // Restore State
     const [isRestoreOpen, setIsRestoreOpen] = useState(false);
@@ -83,8 +109,15 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         stateRef.current = { isDirty, isSaving, isDriveConnected, lastSavedAt };
     }, [isDirty, isSaving, isDriveConnected, lastSavedAt]);
 
-    const markDirty = useCallback(() => setIsDirty(true), []);
-    const markClean = useCallback(() => setIsDirty(false), []);
+    const markDirty = useCallback(() => {
+        setIsDirty(true);
+        if (activeProfile?.id) setDirtyFlag(activeProfile.id, true);
+    }, [activeProfile?.id]);
+
+    const markClean = useCallback(() => {
+        setIsDirty(false);
+        if (activeProfile?.id) setDirtyFlag(activeProfile.id, false);
+    }, [activeProfile?.id]);
 
     // Helper to fetch user info
     const fetchDriveUser = useCallback(async () => {
@@ -92,9 +125,13 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const user = await driveClient.getUserInfo();
             setDriveUser(user);
             setLastUserRefreshAt(Date.now());
-        } catch (e) {
+        } catch (e: any) {
+            if (e.message && e.message.includes('401')) {
+                tokenManager.clear();
+                setIsDriveConnected(false);
+                setDriveStatus('disconnected');
+            }
             console.error("Failed to fetch drive user info", e);
-            // Non-critical, just don't set user
         }
     }, []);
 
@@ -107,7 +144,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Diagnostic log (once)
         if (import.meta.env.DEV) {
-            console.log(`[DRIVE] client id present: ${hasConfig} (ID: ${masked})`);
+            console.log(`[SYNC_DIAG] Init SyncProvider. ClientID present: ${hasConfig} (ID: ${masked})`);
         }
 
         if (!hasConfig) {
@@ -123,15 +160,74 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 console.info('[DRIVE] client_id loaded:', masked);
             }
             // Check if already authenticated via tokenManager
-            if (driveClient.isAuthenticated()) {
-                setIsDriveConnected(true);
-                setDriveStatus('connected');
-                fetchDriveUser();
-            } else {
-                setDriveStatus('disconnected');
-            }
+        }
+        // Check if already authenticated via tokenManager
+        if (driveClient.isAuthenticated()) {
+            console.log('[SYNC_DIAG] Auto-detected existing session.');
+            setIsDriveConnected(true);
+            setDriveStatus('connected');
+            fetchDriveUser();
+            // We will check for updates in a separate effect or here
+        } else {
+            setDriveStatus('disconnected');
         }
     }, [fetchDriveUser]);
+
+    // Smart Sync Check Logic
+    const checkForUpdates = useCallback(async () => {
+        if (!driveClient.isAuthenticated() || !activeProfile?.id) return;
+
+        try {
+            const meta = await driveClient.getLatestBackupMeta(activeProfile.drivePrefix);
+            if (!meta) return;
+
+            const remoteTs = new Date(meta.modifiedTime).getTime();
+            const localTs = getLocalTs(activeProfile.id);
+            const isDirtyLocal = getDirtyFlag(activeProfile.id); // Check LS directly for truth
+
+            console.log(`[SYNC_DIAG] Smart Check. Remote: ${remoteTs}, Local: ${localTs}, Dirty: ${isDirtyLocal}`);
+
+            // Threshold: Remote must be > Local by at least 1 second to count as newer
+            if (remoteTs > localTs + 1000) {
+                if (!isDirtyLocal) {
+                    // Safe to Auto-Restore
+                    console.log('[SYNC_DIAG] Auto-restoring newer remote version (Clean local state)...');
+                    await restoreFromBackupFile({
+                        drive: driveClient,
+                        fileId: meta.id,
+                        onProgress: (p) => console.log(`[SYNC_DIAG] Auto-Restore: ${p.percent}% ${p.phase}`),
+                    });
+                    // Update local TS to match remote to prevent loop
+                    setLocalTs(activeProfile.id, remoteTs);
+                    setDirtyFlag(activeProfile.id, false);
+                    setIsDirty(false);
+                    setRemoteUpdateAvailable(null);
+                    // Reload Window to reflect changes safely? Or just trust React State updates? 
+                    // RestoreEngine updates Stores, which emit events. React components should update.
+                    // A force reload is sometimes safer but disruptive. Let's rely on Store events.
+                    window.location.reload(); // Hard refresh to ensure clean state
+                } else {
+                    // Conflict / Unsaved Work: Show Banner
+                    console.log('[SYNC_DIAG] Remote is newer but Local is Dirty. Showing Banner.');
+                    setRemoteUpdateAvailable({ id: meta.id, date: new Date(meta.modifiedTime) });
+                }
+            } else {
+                setRemoteUpdateAvailable(null);
+            }
+
+        } catch (e) {
+            console.error('[SYNC_DIAG] Check updates failed', e);
+        }
+    }, [activeProfile]);
+
+    // Periodic Check & Init Check
+    useEffect(() => {
+        if (isDriveConnected && activeProfile?.id) {
+            checkForUpdates();
+            const interval = setInterval(checkForUpdates, 90000); // 90s
+            return () => clearInterval(interval);
+        }
+    }, [isDriveConnected, activeProfile?.id, checkForUpdates]);
 
     const connectDrive = useCallback(async () => {
         if (!hasGoogleClientId()) {
@@ -143,7 +239,9 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setDriveError(undefined);
 
         try {
+            console.log('[SYNC_DIAG] Connecting Drive...');
             await driveClient.signIn();
+            console.log('[SYNC_DIAG] Drive Connected Successfully');
             setIsDriveConnected(true);
             setDriveStatus('connected');
             fetchDriveUser();
@@ -167,6 +265,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const refreshBackups = useCallback(async () => {
         if (!driveClient.isAuthenticated()) return;
+        console.log('[SYNC_DIAG] Refreshing backups list...');
         setLoadingBackups(true);
         setErrorBackups(undefined);
         try {
@@ -210,23 +309,29 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLastError(undefined);
 
         try {
-            console.info(`[SYNC] Saving... Reason: ${reason}, Prefix: ${activeProfile.drivePrefix}`);
+            console.info(`[SYNC_DIAG] Saving... Reason: ${reason}, Prefix: ${activeProfile.drivePrefix}`);
             const { files } = await buildBackupV2(activeProfile);
 
             for (const file of files) {
+                console.log(`[SYNC_DIAG] Uploading chunk: ${file.name}`);
                 await driveClient.uploadToAppData(file.name, file.blob, 'application/json');
             }
 
-            setLastSavedAt(new Date().toISOString());
+            const nowTs = Date.now();
+            setLastSavedAt(new Date(nowTs).toISOString());
             setLastSaveStatus('ok');
             setIsDirty(false);
+            setDirtyFlag(activeProfile.id, false);
+            setLocalTs(activeProfile.id, nowTs);
+            // also clear banner if we just overwrote remote (remote logic dictates we are now latest)
+            setRemoteUpdateAvailable(null);
 
             if (reason === 'autosave-idle' || reason === 'autosave-blur') {
                 console.info('[SYNC] Autosave completed.');
             }
 
         } catch (err: any) {
-            console.error("Save failed", err);
+            console.error("[SYNC_DIAG] Save failed", err);
             setLastSaveStatus('error');
             setLastError(err.message || "Error al guardar en Drive");
 
@@ -255,12 +360,37 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             getLastSavedAt: () => stateRef.current.lastSavedAt ? new Date(stateRef.current.lastSavedAt).getTime() : null,
             onLog: (msg) => console.log(msg)
         });
-        return cleanup;
+
+        // Visibility & Unload Helpers (Safety Net)
+        const handleVisibilityDetails = () => {
+            if (document.visibilityState === 'hidden' && stateRef.current.isDirty && stateRef.current.isDriveConnected) {
+                console.log('[SYNC_DIAG] Tab hidden + Dirty -> Forcing Save');
+                saveNowRef.current({ reason: 'autosave-blur' });
+            }
+        };
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (stateRef.current.isDirty && stateRef.current.isDriveConnected) {
+                // Try to fire one last shot (best effor, fetch keepalive not guaranteed in complex async)
+                // Just triggering saveNow here might not finish.
+                // We rely on visibilityChange mostly.
+                e.preventDefault();
+                e.returnValue = 'Tienes cambios sin guardar. ¿Salir?';
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityDetails);
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        return () => {
+            cleanup();
+            document.removeEventListener('visibilitychange', handleVisibilityDetails);
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+        };
     }, []); // Run ONCE on mount. The engine uses refs/callbacks to get fresh state.
 
     // --- Restore Logic ---
     const openRestore = useCallback(() => {
-        console.log("Opening restore modal...", isDriveConnected);
+        console.log("[SYNC_DIAG] Opening restore modal. Connected:", isDriveConnected);
         if (!isDriveConnected) {
             alert("Conecta Google Drive primero para restaurar.");
             return;
@@ -283,6 +413,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         restoreAbortController.current = new AbortController();
 
         try {
+            console.log(`[SYNC_DIAG] Starting restore from file: ${file.id}`);
             await restoreFromBackupFile({
                 drive: driveClient,
                 fileId: file.id,
@@ -293,7 +424,10 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Success
             markClean();
             setIsRestoreOpen(false);
-            setLastSavedAt(new Date().toISOString());
+            const nowTs = Date.now();
+            setLastSavedAt(new Date(nowTs).toISOString());
+            setLocalTs(activeProfile.id, nowTs); // We are now consistent with "latest" locally
+            setRemoteUpdateAvailable(null);
             setLastSaveStatus('ok');
             setLastSaveStatus(undefined);
 
@@ -345,18 +479,34 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isDirty, isSaving, saveNow, isDriveConnected, isRestoreOpen, openRestore]);
 
-    // Before Unload
-    useEffect(() => {
-        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-            if (isDirty) {
-                e.preventDefault();
-                e.returnValue = '';
-            }
-        };
+    const resolveRemoteUpdate = async (action: 'pull' | 'push') => {
+        if (!remoteUpdateAvailable) return;
 
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-    }, [isDirty]);
+        if (action === 'pull') {
+            try {
+                // Manual trigger of auto-restore logic
+                setIsRestoring(true);
+                await restoreFromBackupFile({
+                    drive: driveClient,
+                    fileId: remoteUpdateAvailable.id,
+                    onProgress: (p) => setRestoreProgress(p),
+                });
+                setLocalTs(activeProfile.id, remoteUpdateAvailable.date.getTime());
+                setDirtyFlag(activeProfile.id, false);
+                setIsDirty(false);
+                setRemoteUpdateAvailable(null);
+                window.location.reload();
+            } catch (e: any) {
+                setRestoreError(e.message);
+                setIsRestoring(false);
+            }
+        } else {
+            // Push: We overwrite remote. Just trigger save.
+            await saveNow({ reason: 'manual' });
+            // saveNow updates localTs and clears dirty, clearing the conflict state
+            setRemoteUpdateAvailable(null);
+        }
+    };
 
     return (
         <SyncContext.Provider value={{
@@ -379,8 +529,64 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             openRestore,
             isRestoring,
             restoreProgress,
-            refreshBackups
+            refreshBackups,
+            checkForUpdates,
+            remoteUpdateAvailable,
+            resolveRemoteUpdate
         }}>
+            {remoteUpdateAvailable && (
+                <div style={{
+                    position: 'fixed',
+                    bottom: 20,
+                    right: 20,
+                    zIndex: 9999,
+                    background: '#1e293b',
+                    color: 'white',
+                    padding: '16px',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                    border: '1px solid #3b82f6',
+                    maxWidth: '300px'
+                }}>
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 'bold' }}>Conflicto de Sincronización</h4>
+                    <p style={{ margin: '0 0 12px 0', fontSize: '12px', opacity: 0.9 }}>
+                        Hay una versión más nueva en Drive ({remoteUpdateAvailable.date.toLocaleTimeString()}).
+                        Tienes cambios locales sin guardar.
+                    </p>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                            onClick={() => resolveRemoteUpdate('pull')}
+                            style={{
+                                flex: 1,
+                                padding: '6px 12px',
+                                background: '#3b82f6',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Bajar Remoto
+                        </button>
+                        <button
+                            onClick={() => resolveRemoteUpdate('push')}
+                            style={{
+                                flex: 1,
+                                padding: '6px 12px',
+                                background: 'transparent',
+                                border: '1px solid #475569',
+                                color: '#e2e8f0',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Mantener Local
+                        </button>
+                    </div>
+                </div>
+            )}
             {children}
 
             <RestoreModal

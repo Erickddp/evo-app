@@ -22,7 +22,7 @@ export function setupAutosave(params: AutosaveParams): () => void {
     const IDLE_DELAY_MS = 8000; // 8 seconds
     const THROTTLE_MS = 60000; // 60 seconds
 
-    const log = (msg: string) => onLog && onLog(`[Autosave] ${msg}`);
+    const log = (msg: string) => onLog && onLog(`[SYNC_DIAG] [Autosave] ${msg}`);
 
     let warnedNotAuth = false;
 

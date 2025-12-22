@@ -13,8 +13,8 @@ export class TokenManager {
         // Calculate expiration time (safety margin: 60s)
         this.expiresAt = Date.now() + (expiresInSec * 1000) - 60000;
 
-        sessionStorage.setItem(this.STORAGE_KEY_TOKEN, token);
-        sessionStorage.setItem(this.STORAGE_KEY_EXPIRES, this.expiresAt.toString());
+        localStorage.setItem(this.STORAGE_KEY_TOKEN, token);
+        localStorage.setItem(this.STORAGE_KEY_EXPIRES, this.expiresAt.toString());
     }
 
     getToken(): string | null {
@@ -32,13 +32,13 @@ export class TokenManager {
     clear() {
         this.accessToken = null;
         this.expiresAt = 0;
-        sessionStorage.removeItem(this.STORAGE_KEY_TOKEN);
-        sessionStorage.removeItem(this.STORAGE_KEY_EXPIRES);
+        localStorage.removeItem(this.STORAGE_KEY_TOKEN);
+        localStorage.removeItem(this.STORAGE_KEY_EXPIRES);
     }
 
     private loadFromStorage() {
-        const storedToken = sessionStorage.getItem(this.STORAGE_KEY_TOKEN);
-        const storedExpires = sessionStorage.getItem(this.STORAGE_KEY_EXPIRES);
+        const storedToken = localStorage.getItem(this.STORAGE_KEY_TOKEN);
+        const storedExpires = localStorage.getItem(this.STORAGE_KEY_EXPIRES);
 
         if (storedToken && storedExpires) {
             this.accessToken = storedToken;
