@@ -8,8 +8,10 @@ import { financialSummaryDefinition } from './financial-summary/meta';
 import { facturasDefinition } from './facturas/meta';
 import { taxCalculationDefinition } from './tax-calculation';
 import { evoLibraryDefinition } from './evo-library/meta';
+import { movimientosBancariosDefinition } from './journey/movimientos-bancarios';
 
 export const tools: Tool[] = [
+    movimientosBancariosDefinition,
     cfdiValidatorDefinition,
     ingresosManagerDefinition,
     bankReconcilerDefinition,

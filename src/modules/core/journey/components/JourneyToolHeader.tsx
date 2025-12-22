@@ -7,13 +7,19 @@ interface JourneyToolHeaderProps {
     currentMonth: string;
     title: string;
     subtitle?: string;
+    hideMonthBadge?: boolean;
 }
 
 /**
  * Standard Header for Tools participating in the Journey.
  * Provides "Back to Journey" navigation and context visibility.
  */
-export const JourneyToolHeader: React.FC<JourneyToolHeaderProps> = ({ currentMonth, title, subtitle }) => {
+export const JourneyToolHeader: React.FC<JourneyToolHeaderProps> = ({
+    currentMonth,
+    title,
+    subtitle,
+    hideMonthBadge = false
+}) => {
     const navigate = useNavigate();
 
     const handleBack = () => {
@@ -51,12 +57,14 @@ export const JourneyToolHeader: React.FC<JourneyToolHeaderProps> = ({ currentMon
                 </div>
             </div>
 
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
-                <Calendar size={14} className="text-gray-500 dark:text-gray-400" />
-                <span className="text-sm font-mono font-medium text-gray-700 dark:text-gray-300">
-                    {currentMonth}
-                </span>
-            </div>
+            {!hideMonthBadge && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <Calendar size={14} className="text-gray-500 dark:text-gray-400" />
+                    <span className="text-sm font-mono font-medium text-gray-700 dark:text-gray-300">
+                        {currentMonth}
+                    </span>
+                </div>
+            )}
         </div>
     );
 };
