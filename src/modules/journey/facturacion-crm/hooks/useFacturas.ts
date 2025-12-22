@@ -345,6 +345,7 @@ export function useFacturas(targetMonth?: string) {
         return new Promise((resolve) => {
             const reader = new FileReader();
             reader.onload = async (e) => {
+                console.log('[SAT_FLOW] RUN legacy parser');
                 console.time('import');
                 const text = e.target?.result as string;
                 if (!text) {
@@ -630,6 +631,7 @@ export function useFacturas(targetMonth?: string) {
 
     const saveSatInvoices = async (rows: SatImportRow[], options?: { mode: 'factura_only' | 'projected' | 'financial_real', overrideType?: 'ingreso' | 'gasto' }) => {
         const { mode = 'projected', overrideType } = options || {};
+        console.log(`[SAT_FLOW] SAVING sat invoices count=${rows.length} mode=${mode}`);
         let count = 0;
         let errors = 0;
 

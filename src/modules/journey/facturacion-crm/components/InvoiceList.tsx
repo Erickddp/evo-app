@@ -72,7 +72,10 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({ invoices, onSelectInvo
                 <div className="flex gap-2">
                     {onImportSat && (
                         <button
-                            onClick={() => setShowSatModal(true)}
+                            onClick={() => {
+                                console.log('[SAT_FLOW] CLICK sat button');
+                                setShowSatModal(true);
+                            }}
                             className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600/20 border border-emerald-600/30 rounded text-sm transition-colors"
                         >
                             <FileSpreadsheet size={16} />

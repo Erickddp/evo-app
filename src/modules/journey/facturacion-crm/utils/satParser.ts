@@ -68,6 +68,7 @@ export async function parseSatCsv(text: string, ownRfc?: string): Promise<Parsed
             normalizedCols.forEach((col, idx) => {
                 headerMap[col] = idx;
             });
+            console.log(`[SAT_FLOW] SAT headers detected: ${normalizedCols.join(', ')}`);
             break;
         }
     }
@@ -174,6 +175,7 @@ export async function parseSatCsv(text: string, ownRfc?: string): Promise<Parsed
         }
     }
 
+    console.log(`[SAT_FLOW] RUN sat parser completed valid=${valid.length} ambiguous=${ambiguous.length} cancelled=${cancelled.length} errors=${errors.length}`);
     return { valid, ambiguous, cancelled, errors };
 }
 

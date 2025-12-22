@@ -7,6 +7,8 @@ import { InvoiceForm } from './components/InvoiceForm';
 import { JourneyToolHeader } from '../../core/journey/components/JourneyToolHeader';
 import { Plus } from 'lucide-react';
 import type { Invoice } from './types';
+import { isSatCsv } from './utils/satDetection';
+
 
 export default function FacturacionCrmTool() {
     const { activeProfile } = useProfile();
@@ -133,21 +135,40 @@ export default function FacturacionCrmTool() {
 
                     {/* Actions */}
                     <div className="flex space-x-2 w-full md:w-auto justify-end">
-                        <label className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md cursor-pointer border border-slate-700 transition-colors text-sm font-medium flex items-center gap-2">
+                        <label
+                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md cursor-pointer border border-slate-700 transition-colors text-sm font-medium flex items-center gap-2"
+                            onClick={() => console.log('[SAT_FLOW] CLICK legacy button')}
+                        >
                             <input
                                 type="file"
                                 accept=".csv"
                                 className="hidden"
-                                onChange={(e) => {
-                                    if (e.target.files?.[0]) {
-                                        importCSV(e.target.files[0]).then(res => {
+                                onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                        console.log(`[SAT_FLOW] CHANGE legacy input file=${file.name} size=${file.size}`);
+
+                                        // SAT Detection Check
+                                        const text = await file.text();
+                                        const firstLine = text.split(/\r?\n/)[0];
+                                        // Quick simple split for headers
+                                        const headers = firstLine.split(',').map(h => h.replace(/^"|"$/g, '').trim());
+
+                                        if (isSatCsv(headers)) {
+                                            console.log('[SAT_FLOW] legacy input detected SAT csv -> redirect');
+                                            alert('DETECTADO ARCHIVO SAT: Por favor usa el botón "Importar SAT" (verde) para este archivo.');
+                                            e.target.value = '';
+                                            return;
+                                        }
+
+                                        importCSV(file).then(res => {
                                             alert(`Importado: ${res.imported}\nSaltado: ${res.skipped}\nErrores: ${res.errors.length}`);
                                         });
                                     }
                                     e.target.value = '';
                                 }}
                             />
-                            <span>Importar CSV</span>
+                            <span>Importar CSV (Legacy)</span>
                         </label>
                         <button
                             onClick={exportCSV}

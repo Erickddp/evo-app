@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Upload, X, Check, FileSpreadsheet } from 'lucide-react';
 import { parseSatCsv, type ParsedSatResult, type SatImportRow } from '../utils/satParser';
@@ -32,6 +32,14 @@ export const SatImportModal: React.FC<SatImportModalProps & { profileId?: string
     const [importMode, setImportMode] = useState<'projected' | 'factura_only' | 'financial_real'>('projected');
     const [overrideType, setOverrideType] = useState<'auto' | 'ingreso' | 'gasto'>('auto');
 
+    // Diagnostic Log: Mount
+    useEffect(() => {
+        console.log(`[SAT_FLOW] SAT modal opened ownRfc=${propRfc} profileId=${profileId}`);
+        if (!profileId) {
+            console.warn('[SAT_FLOW] WARN profileId missing -> using default key for persistence');
+        }
+    }, [propRfc, profileId]);
+
     // If prop was provided, we might want to disable editing strictly, but usually users might want to override.
     // Prompt says: "Mostrar input solo si ownRfc no existe". 
     const isRfcLocked = !!propRfc;
@@ -39,6 +47,8 @@ export const SatImportModal: React.FC<SatImportModalProps & { profileId?: string
     const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
+
+        console.log(`[SAT_FLOW] SAT modal file selected name=${file.name}`);
 
         if (!ownRfc || ownRfc.length < 12) {
             alert("Debes ingresar un RFC válido para continuar.");
